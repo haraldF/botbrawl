@@ -37,6 +37,6 @@
     "jsx": "react-jsx",
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
-    "skipLibCheck": true,
+    "skipLibCheck": true
   }
 }

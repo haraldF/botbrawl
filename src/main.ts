@@ -1,36 +1,16 @@
-type ActionType = 'move' | 'shoot' | 'none';
-
-type BotAction = {
-    type: ActionType;
-    direction: Phaser.Math.Vector2;
-    distance: number;
-    target?: Phaser.Math.Vector2;
-};
-
-type Bot = {
-    id: number;
-    sprite: Phaser.Physics.Arcade.Image;
-    playerId: 1 | 2;
-    action: BotAction;
-    isAlive: boolean;
-    selectedMode: Exclude<ActionType, 'none'>;
-    plannedMove?: BotAction;
-    plannedShoot?: BotAction;
-};
+import type { Bot, BotAction } from './Bot';
+import { planAiActions } from './planAIActions.js';
 
 type BulletSprite = Phaser.Physics.Arcade.Image & {
     ownerBot?: Bot;
 };
 
 class Scene extends Phaser.Scene {
-    // Track the last selected bot index to prevent immediate mode toggle on first tap
-    private lastSelectedIndex: number | null = null;
     private winText?: Phaser.GameObjects.Text;
     private barriers?: Phaser.Physics.Arcade.StaticGroup;
     private bots: Bot[] = [];
     private playerBots: Bot[] = [];
     private aiBots: Bot[] = [];
-    private selectedIndex = 0;
     private maxMoveDistance = 180;
     private shootPreviewLength = 180;
     private roundDurationMs = 2000;
@@ -43,7 +23,6 @@ class Scene extends Phaser.Scene {
     private planGraphics?: Phaser.GameObjects.Graphics;
     private isDragging = false;
     private draggingBot: Bot | undefined;
-    private selectionRing?: Phaser.GameObjects.Graphics;
     private dragStart: Phaser.Math.Vector2 | undefined;
     private planDirty = true;
 
@@ -182,8 +161,6 @@ class Scene extends Phaser.Scene {
                 });
             });
         }
-
-        this.highlightSelected();
     }
 
     private botIdCounter = 1;
@@ -343,8 +320,6 @@ class Scene extends Phaser.Scene {
 
     private createPlanningGraphics() {
         this.planGraphics = this.add.graphics();
-        this.selectionRing = this.add.graphics();
-        this.selectionRing.setDepth(10);
     }
 
     private setupInput() {
@@ -362,23 +337,18 @@ class Scene extends Phaser.Scene {
             if (!this.isPlanning) {
                 return;
             }
-
             const hitBot = this.getPlayerBotAt(pointer.worldX, pointer.worldY);
             if (hitBot) {
-                this.selectBot(hitBot);
                 this.isDragging = true;
                 this.draggingBot = hitBot;
                 this.dragStart = new Phaser.Math.Vector2(pointer.worldX, pointer.worldY);
             }
-
-            this.updateUi();
         });
 
         this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
             if (!this.isPlanning || !this.isDragging || !this.draggingBot || !this.dragStart) {
                 return;
             }
-
             const distance = Phaser.Math.Distance.Between(this.dragStart.x, this.dragStart.y, pointer.worldX, pointer.worldY);
             if (distance >= 6) {
                 this.applyDragAction(this.draggingBot, pointer);
@@ -389,36 +359,26 @@ class Scene extends Phaser.Scene {
             if (!this.isPlanning) {
                 return;
             }
-
             if (this.isDragging && this.draggingBot && this.dragStart) {
                 const distance = Phaser.Math.Distance.Between(this.dragStart.x, this.dragStart.y, pointer.worldX, pointer.worldY);
                 const wasTap = distance < 6;
                 if (wasTap) {
-                    this.handleTap(this.draggingBot);
+                    // Tapping a bot toggles its mode
+                    this.toggleBotMode(this.draggingBot);
                 }
             }
-
             this.isDragging = false;
             this.draggingBot = undefined;
             this.dragStart = undefined;
         });
     }
 
-    private handleTap(hitBot: Bot) {
-        const selected = this.playerBots[this.selectedIndex];
-        if (selected !== hitBot) {
-            this.selectBot(hitBot);
-            this.updateUi();
-            // Update lastSelectedIndex to current
-            this.lastSelectedIndex = this.selectedIndex;
-            return;
-        }
-        // Only toggle mode if the bot was already selected before this tap
-        if (this.lastSelectedIndex === this.selectedIndex) {
-            this.toggleSelectedMode();
-        }
-        // Update lastSelectedIndex to current
-        this.lastSelectedIndex = this.selectedIndex;
+    // Removed handleTap, replaced by toggleBotMode
+    private toggleBotMode(bot: Bot) {
+        bot.selectedMode = bot.selectedMode === 'move' ? 'shoot' : 'move';
+        this.syncActionWithMode(bot);
+        this.planDirty = true;
+        this.updateUi();
     }
 
     private syncActionWithMode(bot: Bot) {
@@ -506,7 +466,7 @@ class Scene extends Phaser.Scene {
         this.playerBots.forEach((bot) => {
             bot.sprite.setScale(1);
         });
-        this.planAiActions();
+        planAiActions(this.playerBots, this.aiBots, this.barriers!, this.maxMoveDistance, this.shootPreviewLength);
         this.executeActions();
         this.clearPlanGraphics();
         this.updateUi();
@@ -596,151 +556,31 @@ class Scene extends Phaser.Scene {
         }
     }
 
-    private planAiActions() {
-        const enemies = this.playerBots;
-        this.aiBots.forEach((bot) => {
-            // Find the closest enemy
-            let target: Bot | null = null;
-            let minDist = Number.POSITIVE_INFINITY;
-            for (const e of enemies) {
-                const d = Phaser.Math.Distance.Between(bot.sprite.x, bot.sprite.y, e.sprite.x, e.sprite.y);
-                if (d < minDist) {
-                    minDist = d;
-                    target = e;
-                }
-            }
-            if (target === null) {
-                return;
-            }
-            let direction = new Phaser.Math.Vector2(
-                target.sprite.x - bot.sprite.x,
-                target.sprite.y - bot.sprite.y
-            );
-            if (direction.lengthSq() === 0) {
-                direction.set(1, 0);
-            }
-            direction.normalize();
-
-            // Randomly shoot or move if within shootPreviewLength
-            if (minDist <= this.shootPreviewLength * 4) {
-                if (Phaser.Math.Between(0, 1) === 0) {
-                    bot.action = { type: 'shoot', direction, distance: 0 };
-                    return;
-                }
-            }
-
-            // Otherwise, move
-            const distance = Phaser.Math.Between(60, this.maxMoveDistance);
-            // Try to avoid barriers
-            let finalDirection = direction.clone();
-            const tryAngles = [0, 20, -20, 40, -40, 60, -60];
-            let foundClear = false;
-            if (this.barriers) {
-                for (const angle of tryAngles) {
-                    const testDir = direction.clone().rotate(Phaser.Math.DegToRad(angle));
-                    const testTarget = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y).add(testDir.clone().scale(distance));
-                    let collision = false;
-                    this.barriers.getChildren().forEach((barrier: Phaser.GameObjects.GameObject) => {
-                        const b = barrier as Phaser.Physics.Arcade.Image;
-                        const line = new Phaser.Geom.Line(bot.sprite.x, bot.sprite.y, testTarget.x, testTarget.y);
-                        const barrierRect = new Phaser.Geom.Rectangle(b.x - b.displayWidth/2, b.y - b.displayHeight/2, b.displayWidth, b.displayHeight);
-                        if (Phaser.Geom.Intersects.LineToRectangle(line, barrierRect)) {
-                            collision = true;
-                        }
-                    });
-                    if (!collision) {
-                        finalDirection = testDir;
-                        foundClear = true;
-                        break;
-                    }
-                }
-            }
-            bot.action = { type: 'move', direction: finalDirection, distance };
-        });
-    }
-
-    private highlightSelected() {
-        // Only increase size for selected, alive bot in planning mode
-        this.playerBots.forEach((bot, index) => {
-            if (this.isPlanning && bot.isAlive && index === this.selectedIndex) {
-                bot.sprite.setScale(1.25);
-            } else {
-                bot.sprite.setScale(1);
-            }
-        });
-        this.updateSelectionRing();
-    }
-
-    private updateSelectionRing() {
-        if (!this.selectionRing) {
-            return;
-        }
-        const selected = this.playerBots[this.selectedIndex];
-        if (!selected) {
-            return;
-        }
-        const color = selected.selectedMode === 'move' ? 0x22c55e : 0xf59e0b;
-        this.selectionRing.clear();
-        this.selectionRing.lineStyle(2, color, 0.9);
-        this.selectionRing.strokeCircle(selected.sprite.x, selected.sprite.y, 18);
-    }
+    // Removed highlightSelected and updateSelectionRing
 
     private updateUi() {
-        const selected = this.playerBots[this.selectedIndex];
-
-        if (selected === undefined) {
-            return;
-        }
-
         const plannedCount = this.playerBots.filter((bot) => bot.action.type !== 'none').length;
-        const modeText = selected.selectedMode === 'move' ? 'move' : 'shoot';
-
         if (this.infoText) {
             const instructions = [
-                `Selected bot: ${this.selectedIndex + 1}/5`,
-                `Mode: ${modeText}`,
                 `Planned: ${plannedCount}/5`,
-                this.isPlanning ? 'Tap to select. Drag to set move/shoot.' : 'Executing round...'
+                this.isPlanning ? 'Drag from a bot to set move/shoot. Tap bot to switch mode.' : 'Executing round...'
             ];
             this.infoText.setText(instructions);
         }
-
         if (this.statusEl) {
             this.statusEl.textContent = this.isPlanning
-                ? `Bot ${this.selectedIndex + 1} • Mode: ${modeText} • Planned: ${plannedCount}/5`
+                ? `Planned: ${plannedCount}/5`
                 : 'Executing round...';
         }
-
         if (this.startButton) {
             this.startButton.disabled = !this.isPlanning;
         }
-
-        // Always update the selection ring to reflect the current mode
-        this.updateSelectionRing();
     }
 
-    private selectBot(bot: Bot) {
-        const index = this.playerBots.indexOf(bot);
-        if (index >= 0) {
-            this.selectedIndex = index;
-            this.highlightSelected();
-            this.planDirty = true;
-            // Do not update lastSelectedIndex here; handleTap manages it
-        }
-    }
-
-    private toggleSelectedMode() {
-        const selected = this.playerBots[this.selectedIndex];
-        if (!selected) return;
-        selected.selectedMode = selected.selectedMode === 'move' ? 'shoot' : 'move';
-        this.syncActionWithMode(selected);
-        this.updateSelectionRing(); // Update ring color immediately after mode change
-        this.planDirty = true; // Mark plan as dirty to trigger re-render if needed
-        this.updateUi();
-    }
+    // Removed selectBot and toggleSelectedMode
 
     private getPlayerBotAt(x: number, y: number): Bot | undefined {
-        return this.playerBots.find((bot) => Phaser.Math.Distance.Between(x, y, bot.sprite.x, bot.sprite.y) <= 18);
+        return this.playerBots.find((bot) => bot.isAlive && Phaser.Math.Distance.Between(x, y, bot.sprite.x, bot.sprite.y) <= 18);
     }
 
     private renderPlans() {
@@ -784,9 +624,6 @@ class Scene extends Phaser.Scene {
         if (this.planGraphics) {
             this.planGraphics.clear();
         }
-        if (this.selectionRing) {
-            this.selectionRing.clear();
-        }
     }
 
     update() {
@@ -794,12 +631,6 @@ class Scene extends Phaser.Scene {
             if (this.planDirty) {
                 this.renderPlans();
                 this.planDirty = false;
-            }
-            this.updateSelectionRing();
-        } else {
-            // Hide the selection ring when not planning
-            if (this.selectionRing) {
-                this.selectionRing.clear();
             }
         }
     }
