@@ -13,6 +13,9 @@ type Bot = {
     playerId: 1 | 2;
     action: BotAction;
     isAlive: boolean;
+    selectedMode: Exclude<ActionType, 'none'>;
+    plannedMove?: BotAction;
+    plannedShoot?: BotAction;
 };
 
 type BulletSprite = Phaser.Physics.Arcade.Image & {
@@ -20,6 +23,8 @@ type BulletSprite = Phaser.Physics.Arcade.Image & {
 };
 
 class Scene extends Phaser.Scene {
+    // Track the last selected bot index to prevent immediate mode toggle on first tap
+    private lastSelectedIndex: number | null = null;
     private winText?: Phaser.GameObjects.Text;
     private bots: Bot[] = [];
     private playerBots: Bot[] = [];
@@ -37,10 +42,8 @@ class Scene extends Phaser.Scene {
     private planGraphics?: Phaser.GameObjects.Graphics;
     private isDragging = false;
     private draggingBot: Bot | undefined;
-    private selectedMode: Exclude<ActionType, 'none'> = 'move';
     private selectionRing?: Phaser.GameObjects.Graphics;
     private dragStart: Phaser.Math.Vector2 | undefined;
-    private _pendingToggleMode = false;
     private planDirty = true;
 
     create() {
@@ -152,7 +155,8 @@ class Scene extends Phaser.Scene {
             sprite,
             playerId,
             action,
-            isAlive: true
+            isAlive: true,
+            selectedMode: 'move'
         };
         return bot;
     }
@@ -295,40 +299,23 @@ class Scene extends Phaser.Scene {
 
             const hitBot = this.getPlayerBotAt(pointer.worldX, pointer.worldY);
             if (hitBot) {
-                // Only toggle mode if tapping the same bot and not starting a drag
-                if (this.playerBots[this.selectedIndex] === hitBot) {
-                    // Prepare for possible drag, but don't toggle mode yet
-                    this.isDragging = true;
-                    this.draggingBot = hitBot;
-                    this.dragStart = new Phaser.Math.Vector2(pointer.worldX, pointer.worldY);
-                    this._pendingToggleMode = true;
-                } else {
-                    this.selectBot(hitBot);
-                    this.selectedMode = 'move';
-                    this.updateSelectionRing(); // Ensure ring color updates when switching to move
-                    this.isDragging = true;
-                    this.draggingBot = hitBot;
-                    this.dragStart = new Phaser.Math.Vector2(pointer.worldX, pointer.worldY);
-                    this._pendingToggleMode = false;
-                }
-            } else {
-                this._pendingToggleMode = false;
+                this.selectBot(hitBot);
+                this.isDragging = true;
+                this.draggingBot = hitBot;
+                this.dragStart = new Phaser.Math.Vector2(pointer.worldX, pointer.worldY);
             }
 
             this.updateUi();
         });
 
         this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-            if (!this.isPlanning || !this.isDragging || !this.draggingBot) {
+            if (!this.isPlanning || !this.isDragging || !this.draggingBot || !this.dragStart) {
                 return;
             }
-            if (this.dragStart) {
-                const distance = Phaser.Math.Distance.Between(this.dragStart.x, this.dragStart.y, pointer.worldX, pointer.worldY);
-                if (distance >= 6) {
-                    // If drag detected, cancel pending toggle
-                    this._pendingToggleMode = false;
-                    this.applyDragAction(this.draggingBot, pointer);
-                }
+
+            const distance = Phaser.Math.Distance.Between(this.dragStart.x, this.dragStart.y, pointer.worldX, pointer.worldY);
+            if (distance >= 6) {
+                this.applyDragAction(this.draggingBot, pointer);
             }
         });
 
@@ -336,15 +323,81 @@ class Scene extends Phaser.Scene {
             if (!this.isPlanning) {
                 return;
             }
-            // If pointerup and pending toggle, and no drag occurred, toggle mode
-            if (this._pendingToggleMode) {
-                this.toggleSelectedMode();
+
+            if (this.isDragging && this.draggingBot && this.dragStart) {
+                const distance = Phaser.Math.Distance.Between(this.dragStart.x, this.dragStart.y, pointer.worldX, pointer.worldY);
+                const wasTap = distance < 6;
+                if (wasTap) {
+                    this.handleTap(this.draggingBot);
+                }
             }
+
             this.isDragging = false;
             this.draggingBot = undefined;
             this.dragStart = undefined;
-            this._pendingToggleMode = false;
         });
+    }
+
+    private handleTap(hitBot: Bot) {
+        const selected = this.playerBots[this.selectedIndex];
+        if (selected !== hitBot) {
+            this.selectBot(hitBot);
+            this.updateUi();
+            // Update lastSelectedIndex to current
+            this.lastSelectedIndex = this.selectedIndex;
+            return;
+        }
+        // Only toggle mode if the bot was already selected before this tap
+        if (this.lastSelectedIndex === this.selectedIndex) {
+            this.toggleSelectedMode();
+        }
+        // Update lastSelectedIndex to current
+        this.lastSelectedIndex = this.selectedIndex;
+    }
+
+    private syncActionWithMode(bot: Bot) {
+        const planned = bot.selectedMode === 'move' ? bot.plannedMove : bot.plannedShoot;
+        if (planned) {
+            bot.action = {
+                type: planned.type,
+                direction: planned.direction.clone(),
+                distance: planned.distance,
+                ...(planned.target ? { target: planned.target.clone() } : {})
+            };
+            return;
+        }
+
+        const origin = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y);
+        const baseDirection = bot.action.direction ? bot.action.direction.clone() : new Phaser.Math.Vector2(1, 0);
+        if (baseDirection.lengthSq() === 0) {
+            baseDirection.set(1, 0);
+        }
+        baseDirection.normalize();
+
+        if (bot.selectedMode === 'move') {
+            const fallbackTarget = bot.action.target ? bot.action.target.clone() : origin.clone().add(baseDirection.clone().scale(this.maxMoveDistance));
+            const distance = Math.min(this.maxMoveDistance, Phaser.Math.Distance.Between(origin.x, origin.y, fallbackTarget.x, fallbackTarget.y));
+            const target = origin.clone().add(baseDirection.clone().scale(distance));
+            const action: BotAction = { type: 'move', direction: baseDirection.clone(), distance, target };
+            bot.action = action;
+            bot.plannedMove = {
+                type: 'move',
+                direction: baseDirection.clone(),
+                distance,
+                target: target.clone()
+            };
+            return;
+        }
+
+        const target = origin.clone().add(baseDirection.clone().scale(this.shootPreviewLength));
+        const shootAction: BotAction = { type: 'shoot', direction: baseDirection.clone(), distance: 0, target };
+        bot.action = shootAction;
+        bot.plannedShoot = {
+            type: 'shoot',
+            direction: baseDirection.clone(),
+            distance: 0,
+            target: target.clone()
+        };
     }
 
     private applyDragAction(bot: Bot, pointer: Phaser.Input.Pointer) {
@@ -354,13 +407,27 @@ class Scene extends Phaser.Scene {
         }
         direction.normalize();
 
-        if (this.selectedMode === 'move') {
+        if (bot.selectedMode === 'move') {
             const distance = Math.min(this.maxMoveDistance, Phaser.Math.Distance.Between(bot.sprite.x, bot.sprite.y, pointer.worldX, pointer.worldY));
             const clampedTarget = direction.clone().scale(distance).add(new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y));
-            bot.action = { type: 'move', direction, distance, target: clampedTarget };
-        } else if (this.selectedMode === 'shoot') {
+            const action: BotAction = { type: 'move', direction, distance, target: clampedTarget };
+            bot.action = action;
+            bot.plannedMove = {
+                type: 'move',
+                direction: direction.clone(),
+                distance,
+                target: clampedTarget.clone()
+            };
+        } else if (bot.selectedMode === 'shoot') {
             const target = direction.clone().scale(this.shootPreviewLength).add(new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y));
-            bot.action = { type: 'shoot', direction, distance: 0, target };
+            const action: BotAction = { type: 'shoot', direction, distance: 0, target };
+            bot.action = action;
+            bot.plannedShoot = {
+                type: 'shoot',
+                direction: direction.clone(),
+                distance: 0,
+                target: target.clone()
+            };
         }
 
         this.planDirty = true;
@@ -382,6 +449,8 @@ class Scene extends Phaser.Scene {
             if (bot.isAlive) {
                 bot.sprite.setVelocity(0, 0);
                 bot.action = { type: 'none', direction: new Phaser.Math.Vector2(1, 0), distance: 0 };
+                delete bot.plannedMove;
+                delete bot.plannedShoot;
             }
         });
         this.clearParticles();
@@ -510,7 +579,7 @@ class Scene extends Phaser.Scene {
         if (!selected) {
             return;
         }
-        const color = this.selectedMode === 'move' ? 0x22c55e : 0xf59e0b;
+        const color = selected.selectedMode === 'move' ? 0x22c55e : 0xf59e0b;
         this.selectionRing.clear();
         this.selectionRing.lineStyle(2, color, 0.9);
         this.selectionRing.strokeCircle(selected.sprite.x, selected.sprite.y, 18);
@@ -524,7 +593,7 @@ class Scene extends Phaser.Scene {
         }
 
         const plannedCount = this.playerBots.filter((bot) => bot.action.type !== 'none').length;
-        const modeText = this.selectedMode === 'move' ? 'move' : 'shoot';
+        const modeText = selected.selectedMode === 'move' ? 'move' : 'shoot';
 
         if (this.infoText) {
             const instructions = [
@@ -556,11 +625,15 @@ class Scene extends Phaser.Scene {
             this.selectedIndex = index;
             this.highlightSelected();
             this.planDirty = true;
+            // Do not update lastSelectedIndex here; handleTap manages it
         }
     }
 
     private toggleSelectedMode() {
-        this.selectedMode = this.selectedMode === 'move' ? 'shoot' : 'move';
+        const selected = this.playerBots[this.selectedIndex];
+        if (!selected) return;
+        selected.selectedMode = selected.selectedMode === 'move' ? 'shoot' : 'move';
+        this.syncActionWithMode(selected);
         this.updateSelectionRing(); // Update ring color immediately after mode change
         this.planDirty = true; // Mark plan as dirty to trigger re-render if needed
         this.updateUi();
@@ -576,19 +649,12 @@ class Scene extends Phaser.Scene {
             return;
         }
         planGraphics.clear();
-        this.playerBots.forEach((bot, index) => {
+        this.playerBots.forEach((bot) => {
             if (bot.action.type === 'none') {
                 return;
             }
-            // Use selectedMode color for the selected bot, otherwise use action type
-            let color: number;
-            let isMove: boolean;
-            if (index === this.selectedIndex) {
-                isMove = this.selectedMode === 'move';
-            } else {
-                isMove = bot.action.type === 'move';
-            }
-            color = isMove ? 0x22c55e : 0xf59e0b;
+            const isMove = bot.action.type === 'move';
+            const color = isMove ? 0x22c55e : 0xf59e0b;
             planGraphics.lineStyle(2, color, 0.7);
             if (isMove) {
                 const target = bot.action.target ?? new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y);
