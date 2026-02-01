@@ -26,6 +26,7 @@ class Scene extends Phaser.Scene {
     // Track the last selected bot index to prevent immediate mode toggle on first tap
     private lastSelectedIndex: number | null = null;
     private winText?: Phaser.GameObjects.Text;
+    private barriers?: Phaser.Physics.Arcade.StaticGroup;
     private bots: Bot[] = [];
     private playerBots: Bot[] = [];
     private aiBots: Bot[] = [];
@@ -66,12 +67,51 @@ class Scene extends Phaser.Scene {
         });
 
         this.createBotTextures();
+        this.createBarriers();
         this.createBots();
         this.createUi();
         this.createParticles();
         this.createPlanningGraphics();
         this.setupInput();
         this.updateUi();
+
+    }
+
+    private createBarriers() {
+        // Create a static group for barriers
+        this.barriers = this.physics.add.staticGroup();
+
+        // Place 6 shorter, well-distributed vertical barriers between the two teams
+        const barrierCount = 6;
+        const padding = 80;
+        const barrierWidth = 16;
+        const barrierHeight = 90;
+        const fieldWidth = this.scale.width;
+        const fieldHeight = this.scale.height;
+        // Divide the central field into equal vertical slices for even distribution
+        const minX = fieldWidth * 0.22;
+        const maxX = fieldWidth * 0.78;
+        const sliceWidth = (maxX - minX) / (barrierCount - 1);
+        // Create a graphics texture for square barriers
+        if (!this.textures.exists('barrier-rect')) {
+            const g = this.add.graphics();
+            g.fillStyle(0x888888, 0.95);
+            g.fillRect(0, 0, barrierWidth, barrierHeight);
+            g.generateTexture('barrier-rect', barrierWidth, barrierHeight);
+            g.destroy();
+        }
+        for (let i = 0; i < barrierCount; i++) {
+            // Evenly distribute x, with a small random offset for variety
+            const baseX = minX + i * sliceWidth;
+            const x = baseX + Phaser.Math.Between(-16, 16);
+            // Random y, but keep inside field
+            const y = Phaser.Math.Between(padding + barrierHeight/2, fieldHeight - padding - barrierHeight/2);
+            // Add a vertical static physics image barrier using the square texture
+            const barrier = this.physics.add.staticImage(x, y, 'barrier-rect');
+            barrier.setOrigin(0.5, 0.5);
+            this.barriers.add(barrier);
+        }
+        this.barriers.refresh();
     }
 
     private createBotTextures() {
@@ -123,13 +163,24 @@ class Scene extends Phaser.Scene {
 
         // Enable collision and bounce between all bots
         this.bots.forEach(bot => {
-            bot.sprite.setBounce(1, 1);
+            bot.sprite.setBounce(1, 1); // Full bounce for bot-bot
         });
         // Add collider for each unique pair of bots
         for (let i = 0; i < this.bots.length; i++) {
             for (let j = i + 1; j < this.bots.length; j++) {
                 this.physics.add.collider(this.bots[i]!.sprite, this.bots[j]!.sprite);
             }
+        }
+
+        // Add collider between bots and barriers with low bounce
+        if (this.barriers) {
+            this.bots.forEach(bot => {
+                this.physics.add.collider(bot.sprite, this.barriers!, undefined, (botObj, barrierObj) => {
+                    // Set a low bounce only for bot-barrier collision
+                    (botObj as Phaser.Physics.Arcade.Image).setBounce(0.15, 0.15);
+                    return true;
+                });
+            });
         }
 
         this.highlightSelected();
@@ -167,6 +218,7 @@ class Scene extends Phaser.Scene {
             maxSize: 200
         });
 
+        // Bullets hit bots
         this.physics.add.overlap(
             this.particles,
             this.bots.map(bot => bot.sprite),
@@ -184,6 +236,20 @@ class Scene extends Phaser.Scene {
                 }
             }
         );
+
+        // Bullets collide with barriers (destroy bullet)
+        if (this.barriers) {
+            const destroyBullet: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback = (obj1, obj2) => {
+                // obj1 is the bullet, obj2 is the barrier
+                const particle = obj1 as BulletSprite;
+                if (particle.active) {
+                    delete particle.ownerBot;
+                    particle.destroy();
+                }
+            };
+            this.physics.add.collider(this.particles, this.barriers, destroyBullet);
+            this.physics.add.overlap(this.particles, this.barriers, destroyBullet);
+        }
     }
 
     private handleBotHit(bot: Bot, particle: BulletSprite) {
@@ -436,6 +502,10 @@ class Scene extends Phaser.Scene {
 
     private startRound() {
         this.isPlanning = false;
+        // Revert all player bot sizes to normal at round start
+        this.playerBots.forEach((bot) => {
+            bot.sprite.setScale(1);
+        });
         this.planAiActions();
         this.executeActions();
         this.clearPlanGraphics();
@@ -542,7 +612,7 @@ class Scene extends Phaser.Scene {
             if (target === null) {
                 return;
             }
-            const direction = new Phaser.Math.Vector2(
+            let direction = new Phaser.Math.Vector2(
                 target.sprite.x - bot.sprite.x,
                 target.sprite.y - bot.sprite.y
             );
@@ -558,15 +628,45 @@ class Scene extends Phaser.Scene {
                     return;
                 }
             }
+
             // Otherwise, move
             const distance = Phaser.Math.Between(60, this.maxMoveDistance);
-            bot.action = { type: 'move', direction, distance };
+            // Try to avoid barriers
+            let finalDirection = direction.clone();
+            const tryAngles = [0, 20, -20, 40, -40, 60, -60];
+            let foundClear = false;
+            if (this.barriers) {
+                for (const angle of tryAngles) {
+                    const testDir = direction.clone().rotate(Phaser.Math.DegToRad(angle));
+                    const testTarget = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y).add(testDir.clone().scale(distance));
+                    let collision = false;
+                    this.barriers.getChildren().forEach((barrier: Phaser.GameObjects.GameObject) => {
+                        const b = barrier as Phaser.Physics.Arcade.Image;
+                        const line = new Phaser.Geom.Line(bot.sprite.x, bot.sprite.y, testTarget.x, testTarget.y);
+                        const barrierRect = new Phaser.Geom.Rectangle(b.x - b.displayWidth/2, b.y - b.displayHeight/2, b.displayWidth, b.displayHeight);
+                        if (Phaser.Geom.Intersects.LineToRectangle(line, barrierRect)) {
+                            collision = true;
+                        }
+                    });
+                    if (!collision) {
+                        finalDirection = testDir;
+                        foundClear = true;
+                        break;
+                    }
+                }
+            }
+            bot.action = { type: 'move', direction: finalDirection, distance };
         });
     }
 
     private highlightSelected() {
+        // Only increase size for selected, alive bot in planning mode
         this.playerBots.forEach((bot, index) => {
-            bot.sprite.setScale(index === this.selectedIndex ? 1.25 : 1);
+            if (this.isPlanning && bot.isAlive && index === this.selectedIndex) {
+                bot.sprite.setScale(1.25);
+            } else {
+                bot.sprite.setScale(1);
+            }
         });
         this.updateSelectionRing();
     }
