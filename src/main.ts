@@ -712,12 +712,19 @@ const game = new Phaser.Game(config);
 // Responsive resize: scale canvas to fit window while maintaining aspect ratio
 function resizeGame() {
     const canvas = document.querySelector('canvas');
-    if (!canvas) return;
+    if (!canvas || !game || !game.scale) return;
     const windowWidth = window.innerWidth;
     const windowHeight = window.innerHeight;
     const scale = Math.min(windowWidth / GAME_WIDTH, windowHeight / GAME_HEIGHT);
     const displayWidth = Math.floor(GAME_WIDTH * scale);
     const displayHeight = Math.floor(GAME_HEIGHT * scale);
+    // Resize Phaser's scale manager (this will update the game size internally)
+    game.scale.resize(GAME_WIDTH, GAME_HEIGHT);
+    // Optionally, refresh the scene's scale (for Phaser 3.60+)
+    if (game.scene && game.scene.scenes && game.scene.scenes[0] && game.scene.scenes[0].scale) {
+        game.scene.scenes[0].scale.refresh();
+    }
+    // Now update the canvas CSS for display
     canvas.style.width = displayWidth + 'px';
     canvas.style.height = displayHeight + 'px';
     canvas.style.display = 'block';
