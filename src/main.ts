@@ -709,30 +709,10 @@ const config: Phaser.Types.Core.GameConfig = {
 
 const game = new Phaser.Game(config);
 
-// Responsive resize: scale canvas to fit window while maintaining aspect ratio
-function resizeGame() {
-    const canvas = document.querySelector('canvas');
-    if (!canvas) return;
-    const windowWidth = window.innerWidth;
-    const windowHeight = window.innerHeight;
-    const scale = Math.min(windowWidth / GAME_WIDTH, windowHeight / GAME_HEIGHT);
-    const displayWidth = Math.floor(GAME_WIDTH * scale);
-    const displayHeight = Math.floor(GAME_HEIGHT * scale);
+window.addEventListener('resize', () => {
+    setTimeout(() => {
+        window.scrollTo(0, 0);
+    }, 100);
+});
 
-    // Set canvas element width/height attributes (not just CSS)
-    canvas.width = GAME_WIDTH;
-    canvas.height = GAME_HEIGHT;
 
-    // Set CSS for display size
-    canvas.style.width = displayWidth + 'px';
-    canvas.style.height = displayHeight + 'px';
-    canvas.style.display = 'block';
-    canvas.style.margin = 'auto';
-
-    // Scroll to top to avoid browser UI overlays on mobile
-    window.scrollTo(0, 0);
-}
-
-window.addEventListener('resize', resizeGame);
-window.addEventListener('DOMContentLoaded', resizeGame);
-setTimeout(resizeGame, 0);
