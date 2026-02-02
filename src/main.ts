@@ -6,6 +6,8 @@ type BulletSprite = Phaser.Physics.Arcade.Image & {
 };
 
 class Scene extends Phaser.Scene {
+    private welcomeBox?: HTMLElement | null;
+    private welcomeStartButton?: HTMLButtonElement | null;
     private winText?: Phaser.GameObjects.Text;
     private barriers?: Phaser.Physics.Arcade.StaticGroup;
     private bots: Bot[] = [];
@@ -45,15 +47,53 @@ class Scene extends Phaser.Scene {
             }
         });
 
+        this.createUi();
+        this.welcomeBox = document.getElementById('welcome-box');
+        this.welcomeStartButton = document.getElementById('welcome-start') as HTMLButtonElement | null;
+        if (this.welcomeStartButton) {
+            this.welcomeStartButton.addEventListener('click', () => {
+                this.startGame();
+            });
+        }
+        // Hide game UI until game starts
+        const ui = document.getElementById('ui');
+        if (ui) ui.style.display = 'none';
+        if (this.welcomeBox) this.welcomeBox.style.display = '';
+    }
+
+    private startGame() {
+        // Hide welcome, show UI, reset game state
+        if (this.welcomeBox) this.welcomeBox.style.display = 'none';
+        const ui = document.getElementById('ui');
+        if (ui) ui.style.display = '';
+
+        // Reset all game state
+        this.resetGame();
+    }
+
+    private resetGame() {
+        // Remove win text if present
+        if (this.winText) {
+            this.winText.setVisible(false);
+        }
+        // Remove all bots, barriers, particles
+        this.bots.forEach(bot => bot.sprite.destroy());
+        this.bots = [];
+        this.playerBots = [];
+        this.aiBots = [];
+        if (this.barriers) {
+            this.barriers.clear(true, true);
+        }
+        this.clearParticles();
         this.createBotTextures();
         this.createBarriers();
         this.createBots();
-        this.createUi();
         this.createParticles();
         this.createPlanningGraphics();
         this.setupInput();
+        this.isPlanning = true;
+        this.planDirty = true;
         this.updateUi();
-
     }
 
     private createBarriers() {
@@ -292,6 +332,13 @@ class Scene extends Phaser.Scene {
         }
         this.isPlanning = false;
         if (this.startButton) this.startButton.disabled = true;
+
+        // After a short delay, show the welcome box again for replay
+        setTimeout(() => {
+            const ui = document.getElementById('ui');
+            if (ui) ui.style.display = 'none';
+            if (this.welcomeBox) this.welcomeBox.style.display = '';
+        }, 1800);
     }
 
     private createUi() {

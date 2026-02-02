@@ -8,7 +8,12 @@
 		<link rel="stylesheet" href="style.css" />
 	</head>
 	<body>
-		<div id="ui">
+		<div id="welcome-box" class="overlay-box">
+			<h1>Welcome to Bot Brawl</h1>
+			<p>Every round, your bot can either shoot or move. Tap on a bot to change its mode, and tap & drag to choose the direction</p>
+			<button id="welcome-start" type="button">Start Game</button>
+		</div>
+		<div id="ui" style="display:none;">
 			<div id="status">Tap a bot to select, tap again to toggle shoot. Drag to set move or shoot.</div>
 			<button id="start-round" type="button">Start round</button>
 		</div>

@@ -1,19 +1,55 @@
+#welcome-box.overlay-box {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 11, 15, 0.92);
+  z-index: 1000;
+  color: #e6e6e6;
+  font-size: 1.2rem;
+  text-align: center;
+}
+
+#welcome-box h1 {
+  font-size: 2.2rem;
+  margin-bottom: 0.5em;
+  color: #60a5fa;
+}
+
+#welcome-box button {
+  margin-top: 1.5em;
+  background: linear-gradient(135deg, #3b82f6, #60a5fa);
+  color: #0b0b0f;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 28px;
+  font-weight: 600;
+  font-size: 1.1em;
+  letter-spacing: 0.4px;
+  box-shadow: 0 8px 20px rgba(59, 130, 246, 0.35);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+#welcome-box button:active {
+  transform: scale(0.98);
+}
 html, body {
   height: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background: #0b0b0f;
+  background: #000;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #e6e6e6;
 }
 
 canvas {
   display: block;
-  width: 100vw !important;
-  height: 100vh !important;
-  margin: 0;
-  padding: 0;
+  margin: auto;
+  background: #0b0b0f;
   border: none;
 }
 
