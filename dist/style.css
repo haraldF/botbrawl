@@ -99,3 +99,11 @@ canvas {
   cursor: not-allowed;
   box-shadow: none;
 }
+
+.version-info {
+  position: absolute;
+  bottom: 10px;
+  right: 15px;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+}
