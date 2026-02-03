@@ -21,6 +21,7 @@ class Scene extends Phaser.Scene {
     private infoText?: Phaser.GameObjects.Text;
     private statusEl?: HTMLElement | null;
     private startButton?: HTMLButtonElement | null;
+    private fullscreenButton?: HTMLButtonElement | null;
     private particles?: Phaser.Physics.Arcade.Group;
     private planGraphics?: Phaser.GameObjects.Graphics;
     private isDragging = false;
@@ -352,6 +353,7 @@ class Scene extends Phaser.Scene {
         this.infoText.setScrollFactor(0);
         this.statusEl = document.getElementById('status');
         this.startButton = document.getElementById('start-round') as HTMLButtonElement | null;
+        this.fullscreenButton = document.getElementById('fullscreen-button') as HTMLButtonElement | null;
         if (this.statusEl) {
             this.infoText.setVisible(false);
         }
@@ -362,6 +364,19 @@ class Scene extends Phaser.Scene {
                 }
                 this.startRound();
             });
+        }
+        if (this.fullscreenButton) {
+            this.fullscreenButton.addEventListener('click', () => {
+                this.toggleFullscreen();
+            });
+        }
+    }
+
+    private toggleFullscreen() {
+        if (this.scale.isFullscreen) {
+            this.scale.stopFullscreen();
+        } else {
+            this.scale.startFullscreen();
         }
     }
 
@@ -689,6 +704,7 @@ const GAME_HEIGHT = 720;
 
 const config: Phaser.Types.Core.GameConfig = {
     type: Phaser.AUTO,
+    parent: 'game-container',
     scene: Scene,
     input: {
         keyboard: true
@@ -704,6 +720,7 @@ const config: Phaser.Types.Core.GameConfig = {
         autoCenter: Phaser.Scale.CENTER_BOTH,
         width: GAME_WIDTH,
         height: GAME_HEIGHT,
+        fullscreenTarget: 'game-container'
     }
 };
 
