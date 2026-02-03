@@ -643,8 +643,20 @@ class Scene extends Phaser.Scene {
 
     private getPlayerBotAt(x: number, y: number): Bot | undefined {
         // Increased tap radius for better usability on touch devices (iOS)
-        const TAP_RADIUS = 32;
-        return this.playerBots.find((bot) => bot.isAlive && Phaser.Math.Distance.Between(x, y, bot.sprite.x, bot.sprite.y) <= TAP_RADIUS);
+        const TAP_RADIUS = 64;
+        const result = this.playerBots
+            .filter(bot => bot.isAlive)
+            .reduce<{ bot: Bot | undefined; dist: number }>(
+                (acc, bot) => {
+                    const dist = Phaser.Math.Distance.Between(x, y, bot.sprite.x, bot.sprite.y);
+                    if (dist <= TAP_RADIUS && dist < acc.dist) {
+                        return { bot, dist };
+                    }
+                    return acc;
+                },
+                { bot: undefined, dist: TAP_RADIUS + 1 }
+            );
+        return result.bot;
     }
 
     private renderPlans() {
