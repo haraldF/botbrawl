@@ -642,8 +642,10 @@ class Scene extends Phaser.Scene {
     // Removed selectBot and toggleSelectedMode
 
     private getPlayerBotAt(x: number, y: number): Bot | undefined {
-        // Increased tap radius for better usability on touch devices (iOS)
-        const TAP_RADIUS = 64;
+        // Adapt tap radius for hi-dpi (retina) displays
+        const BASE_RADIUS = 64;
+        const pixelRatio = window.devicePixelRatio || 1;
+        const TAP_RADIUS = Math.max(BASE_RADIUS * pixelRatio, BASE_RADIUS); // Ensure minimum size
         const result = this.playerBots
             .filter(bot => bot.isAlive)
             .reduce<{ bot: Bot | undefined; dist: number }>(
