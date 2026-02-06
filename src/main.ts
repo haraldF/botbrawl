@@ -25,6 +25,7 @@ class Scene extends Phaser.Scene {
     private fullscreenButton?: HTMLButtonElement | null;
     private particles?: Phaser.Physics.Arcade.Group;
     private planGraphics?: Phaser.GameObjects.Graphics;
+    private indicators?: Phaser.GameObjects.Group;
     private isDragging = false;
     private draggingBot: Bot | undefined;
     private dragStart: Phaser.Math.Vector2 | undefined;
@@ -97,12 +98,16 @@ class Scene extends Phaser.Scene {
         if (this.barriers) {
             this.barriers.clear(true, true);
         }
+        if (this.indicators) {
+            this.indicators.clear(true, true);
+        }
         this.clearParticles();
         this.createBotTextures();
         this.createBarriers();
         this.createBots();
         this.createParticles();
         this.createPlanningGraphics();
+        this.indicators = this.add.group();
         this.setupInput();
         this.isPlanning = true;
         this.planDirty = true;
@@ -389,19 +394,21 @@ class Scene extends Phaser.Scene {
             }
         });
 
-        this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+        this.input.on('pointerdown', (pointer: Phaser.Input.Pointer, gameObjects: Phaser.GameObjects.GameObject[]) => {
             if (!this.isPlanning) {
                 return;
             }
-            // Check if pointer is on an indicator (move or shoot)
-            const indicatorHit = this.getIndicatorAt(pointer.worldX, pointer.worldY);
-            if (indicatorHit) {
+
+            const hitObject = gameObjects[0];
+
+            if (hitObject && hitObject.getData('isIndicator')) {
                 this.isDragging = true;
-                this.draggingBot = indicatorHit.bot;
+                this.draggingBot = hitObject.getData('bot');
                 this.draggingIndicator = true;
                 this.dragStart = new Phaser.Math.Vector2(pointer.worldX, pointer.worldY);
                 return;
             }
+
             // Otherwise, check for bot
             const hitBot = this.getPlayerBotAt(pointer.worldX, pointer.worldY);
             if (hitBot) {
@@ -569,61 +576,6 @@ class Scene extends Phaser.Scene {
             };
         }
     }
-    // Returns the bot and type of indicator hit (move/shoot) if pointer is on an indicator
-    private getIndicatorAt(x: number, y: number): { bot: Bot } | undefined {
-        for (const bot of this.playerBots) {
-            if (!bot.isAlive) continue;
-
-            if (bot.selectedMode === 'move' && this.isOverMoveIndicator(bot, x, y)) {
-                return { bot };
-            } else if (bot.selectedMode === 'shoot' && this.isOverShootIndicator(bot, x, y)) {
-                return { bot };
-            }
-        }
-        return undefined;
-    }
-
-    private isOverMoveIndicator(bot: Bot, x: number, y: number): boolean {
-        if (bot.action.type === 'move' && bot.action.target) {
-            const MOVE_RADIUS = GameConfig.MOVE_INDICATOR_RADIUS * (window.devicePixelRatio || 1);
-            const dist = Phaser.Math.Distance.Between(x, y, bot.action.target.x, bot.action.target.y);
-            return dist <= MOVE_RADIUS;
-        }
-        return false;
-    }
-
-    private isOverShootIndicator(bot: Bot, x: number, y: number): boolean {
-        if (bot.action.type === 'shoot' && bot.action.target && bot.action.direction) {
-            const SHOOT_RADIUS = GameConfig.SHOOT_INDICATOR_RADIUS * (window.devicePixelRatio || 1);
-            const SHOOT_LINE_TOLERANCE = GameConfig.SHOOT_LINE_TOLERANCE * (window.devicePixelRatio || 1);
-
-            const fieldWidth = this.scale.width;
-            const fieldHeight = this.scale.height;
-            const maxBulletDistance = Math.min(fieldWidth, fieldHeight) / 2;
-            const startOffset = GameConfig.SHOT_START_OFFSET;
-            const direction = bot.action.direction.clone().normalize();
-            const start = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y).add(direction.clone().scale(startOffset));
-            const end = start.clone().add(direction.clone().scale(maxBulletDistance));
-
-            // Check endpoint first
-            const endDist = Phaser.Math.Distance.Between(x, y, end.x, end.y);
-            if (endDist <= SHOOT_RADIUS) {
-                return true;
-            }
-
-            // Check if pointer is near the shoot line
-            const lineLength = Phaser.Math.Distance.Between(start.x, start.y, end.x, end.y);
-            if (lineLength < 1) return false;
-
-            const toPointer = new Phaser.Math.Vector2(x - start.x, y - start.y);
-            const lineDir = new Phaser.Math.Vector2(end.x - start.x, end.y - start.y).normalize();
-            const proj = Phaser.Math.Clamp(toPointer.dot(lineDir), 0, lineLength);
-            const closest = new Phaser.Math.Vector2(start.x + lineDir.x * proj, start.y + lineDir.y * proj);
-            const distToLine = Phaser.Math.Distance.Between(x, y, closest.x, closest.y);
-            return distToLine <= SHOOT_LINE_TOLERANCE;
-        }
-        return false;
-    }
 
     private startRound() {
         this.isPlanning = false;
@@ -766,10 +718,12 @@ class Scene extends Phaser.Scene {
 
     private renderPlans() {
         const planGraphics = this.planGraphics;
-        if (!planGraphics) {
+        if (!planGraphics || !this.indicators) {
             return;
         }
         planGraphics.clear();
+        this.indicators.clear(true, true);
+
         this.playerBots.forEach((bot) => {
             if (bot.action.type === 'none') {
                 return;
@@ -777,6 +731,7 @@ class Scene extends Phaser.Scene {
             const isMove = bot.action.type === 'move';
             const color = isMove ? GameConfig.PLAN_MOVE_COLOR : GameConfig.PLAN_SHOOT_COLOR;
             planGraphics.lineStyle(2, color, 0.7);
+
             if (isMove) {
                 const target = bot.action.target ?? new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y);
                 planGraphics.strokeLineShape(new Phaser.Geom.Line(bot.sprite.x, bot.sprite.y, target.x, target.y));
@@ -784,6 +739,13 @@ class Scene extends Phaser.Scene {
                 planGraphics.fillCircle(target.x, target.y, 8);
                 planGraphics.lineStyle(1.5, color, 0.9);
                 planGraphics.strokeCircle(target.x, target.y, 10);
+
+                const moveIndicator = this.add.circle(target.x, target.y, GameConfig.MOVE_INDICATOR_RADIUS * (window.devicePixelRatio || 1));
+                moveIndicator.setData('isIndicator', true);
+                moveIndicator.setData('bot', bot);
+                this.indicators!.add(moveIndicator);
+                moveIndicator.setInteractive();
+
             } else {
                 // Match the bullet travel distance to the preview (including startOffset)
                 const fieldWidth = this.scale.width;
@@ -797,6 +759,12 @@ class Scene extends Phaser.Scene {
                 planGraphics.strokeLineShape(new Phaser.Geom.Line(bot.sprite.x, bot.sprite.y, end.x, end.y));
                 planGraphics.fillStyle(color, 0.4);
                 planGraphics.fillCircle(end.x, end.y, 4);
+
+                const shootIndicator = this.add.circle(end.x, end.y, GameConfig.SHOOT_INDICATOR_RADIUS * (window.devicePixelRatio || 1));
+                shootIndicator.setData('isIndicator', true);
+                shootIndicator.setData('bot', bot);
+                this.indicators!.add(shootIndicator);
+                shootIndicator.setInteractive();
             }
         });
     }
