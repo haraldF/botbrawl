@@ -433,12 +433,15 @@ class Scene extends Phaser.Scene {
             if (!this.isPlanning) {
                 return;
             }
-            if (this.isDragging && this.draggingBot && this.dragStart) {
+            if (this.isDragging && this.dragStart) {
                 const distance = Phaser.Math.Distance.Between(this.dragStart.x, this.dragStart.y, pointer.worldX, pointer.worldY);
                 const wasTap = distance < 6;
                 if (wasTap && !this.draggingIndicator) {
-                    // Tapping a bot toggles its mode
-                    this.toggleBotMode(this.draggingBot);
+                    // Re-check which bot is under the pointer for tap reliability
+                    const tappedBot = this.getPlayerBotAt(pointer.worldX, pointer.worldY);
+                    if (tappedBot && tappedBot.isAlive) {
+                        this.toggleBotMode(tappedBot);
+                    }
                 }
             }
             this.isDragging = false;
