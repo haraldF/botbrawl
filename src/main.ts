@@ -1,3 +1,4 @@
+import { GameConfig } from './GameConfig.js';
 import type { Bot, BotAction } from './Bot';
 import { planAiActions } from './planAIActions.js';
 
@@ -13,9 +14,9 @@ class Scene extends Phaser.Scene {
     private bots: Bot[] = [];
     private playerBots: Bot[] = [];
     private aiBots: Bot[] = [];
-    private maxMoveDistance = 180;
-    private shootPreviewLength = 180;
-    private roundDurationMs = 2000;
+    private maxMoveDistance = GameConfig.MAX_MOVE_DISTANCE;
+    private shootPreviewLength = GameConfig.SHOOT_PREVIEW_LENGTH;
+    private roundDurationMs = GameConfig.ROUND_DURATION_MS;
     private roundTimer?: Phaser.Time.TimerEvent;
     private isPlanning = true;
     private infoText?: Phaser.GameObjects.Text;
@@ -31,7 +32,7 @@ class Scene extends Phaser.Scene {
     private planDirty = true;
 
     create() {
-        this.cameras.main.setBackgroundColor('#0b0b0f');
+        this.cameras.main.setBackgroundColor(GameConfig.BACKGROUND_COLOR);
         this.physics.world.setBounds(0, 0, this.scale.width, this.scale.height);
         this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {
             this.physics.world.setBounds(0, 0, gameSize.width, gameSize.height);
@@ -39,7 +40,7 @@ class Scene extends Phaser.Scene {
         this.physics.world.on('worldbounds', (body: Phaser.Physics.Arcade.Body) => {
             const sprite = body.gameObject as Phaser.Physics.Arcade.Image | undefined;
             if (sprite) {
-                if (sprite.texture?.key === 'particle') {
+                if (sprite.texture?.key === GameConfig.PARTICLE_TEXTURE) {
                     const bullet = sprite as BulletSprite;
                     delete bullet.ownerBot;
                     bullet.destroy();
@@ -102,23 +103,23 @@ class Scene extends Phaser.Scene {
         // Create a static group for barriers
         this.barriers = this.physics.add.staticGroup();
 
-        // Place 6 shorter, well-distributed vertical barriers between the two teams
-        const barrierCount = 6;
-        const padding = 80;
-        const barrierWidth = 16;
-        const barrierHeight = 90;
+        // Place shorter, well-distributed vertical barriers between the two teams
+        const barrierCount = GameConfig.BARRIER_COUNT;
+        const padding = GameConfig.BARRIER_PADDING;
+        const barrierWidth = GameConfig.BARRIER_WIDTH;
+        const barrierHeight = GameConfig.BARRIER_HEIGHT;
         const fieldWidth = this.scale.width;
         const fieldHeight = this.scale.height;
         // Divide the central field into equal vertical slices for even distribution
-        const minX = fieldWidth * 0.22;
-        const maxX = fieldWidth * 0.78;
+        const minX = fieldWidth * GameConfig.BARRIER_MIN_X_FACTOR;
+        const maxX = fieldWidth * GameConfig.BARRIER_MAX_X_FACTOR;
         const sliceWidth = (maxX - minX) / (barrierCount - 1);
         // Create a graphics texture for square barriers
-        if (!this.textures.exists('barrier-rect')) {
+        if (!this.textures.exists(GameConfig.BARRIER_TEXTURE)) {
             const g = this.add.graphics();
-            g.fillStyle(0x888888, 0.95);
+            g.fillStyle(GameConfig.BARRIER_COLOR, 0.95);
             g.fillRect(0, 0, barrierWidth, barrierHeight);
-            g.generateTexture('barrier-rect', barrierWidth, barrierHeight);
+            g.generateTexture(GameConfig.BARRIER_TEXTURE, barrierWidth, barrierHeight);
             g.destroy();
         }
         for (let i = 0; i < barrierCount; i++) {
@@ -128,7 +129,7 @@ class Scene extends Phaser.Scene {
             // Random y, but keep inside field
             const y = Phaser.Math.Between(padding + barrierHeight/2, fieldHeight - padding - barrierHeight/2);
             // Add a vertical static physics image barrier using the square texture
-            const barrier = this.physics.add.staticImage(x, y, 'barrier-rect');
+            const barrier = this.physics.add.staticImage(x, y, GameConfig.BARRIER_TEXTURE);
             barrier.setOrigin(0.5, 0.5);
             this.barriers.add(barrier);
         }
@@ -144,16 +145,16 @@ class Scene extends Phaser.Scene {
             g.destroy();
         };
 
-        makeCircle('bot-player', 0x4aa3ff);
-        makeCircle('bot-ai', 0xff6b6b);
-        makeCircle('particle', 0xffffff);
+        makeCircle(GameConfig.BOT_PLAYER_TEXTURE, GameConfig.BOT_PLAYER_COLOR);
+        makeCircle(GameConfig.BOT_AI_TEXTURE, GameConfig.BOT_AI_COLOR);
+        makeCircle(GameConfig.PARTICLE_TEXTURE, GameConfig.PARTICLE_COLOR);
     }
 
     private createBots() {
-        const padding = 60;
+        const padding = GameConfig.BOT_SPAWN_PADDING;
         const leftX = padding;
         const rightX = this.scale.width - padding;
-        const minDist = 36; // Minimum distance between bots (diameter + margin)
+        const minDist = GameConfig.BOT_MIN_DISTANCE; // Minimum distance between bots (diameter + margin)
 
         // Helper to find a non-overlapping y position
         const findNonOverlappingY = (x: number, bots: Bot[]): number => {
@@ -170,14 +171,14 @@ class Scene extends Phaser.Scene {
 
         for (let i = 0; i < 5; i += 1) {
             const y = findNonOverlappingY(leftX, this.playerBots);
-            const bot = this.createBot(leftX, y, 1, 'bot-player');
+            const bot = this.createBot(leftX, y, 1, GameConfig.BOT_PLAYER_TEXTURE);
             this.playerBots.push(bot);
             this.bots.push(bot);
         }
 
         for (let i = 0; i < 5; i += 1) {
             const y = findNonOverlappingY(rightX, this.aiBots.concat(this.playerBots));
-            const bot = this.createBot(rightX, y, 2, 'bot-ai');
+            const bot = this.createBot(rightX, y, 2, GameConfig.BOT_AI_TEXTURE);
             this.aiBots.push(bot);
             this.bots.push(bot);
         }
@@ -198,7 +199,7 @@ class Scene extends Phaser.Scene {
             this.bots.forEach(bot => {
                 this.physics.add.collider(bot.sprite, this.barriers!, undefined, (botObj, barrierObj) => {
                     // Set a low bounce only for bot-barrier collision
-                    (botObj as Phaser.Physics.Arcade.Image).setBounce(0.15, 0.15);
+                    (botObj as Phaser.Physics.Arcade.Image).setBounce(GameConfig.BOT_BARRIER_BOUNCE, GameConfig.BOT_BARRIER_BOUNCE);
                     return true;
                 });
             });
@@ -211,7 +212,7 @@ class Scene extends Phaser.Scene {
         sprite.setCollideWorldBounds(true);
         sprite.setDamping(true);
         sprite.setDrag(0.9, 0.9);
-        sprite.setMaxVelocity(260, 260);
+        sprite.setMaxVelocity(GameConfig.BOT_MAX_VELOCITY, GameConfig.BOT_MAX_VELOCITY);
         sprite.body.onWorldBounds = true;
 
         const action: BotAction = {
@@ -233,7 +234,7 @@ class Scene extends Phaser.Scene {
 
     private createParticles() {
         this.particles = this.physics.add.group({
-            defaultKey: 'particle',
+            defaultKey: GameConfig.PARTICLE_TEXTURE,
             maxSize: 200
         });
 
@@ -323,14 +324,9 @@ class Scene extends Phaser.Scene {
             this.winText.setText(msg);
             this.winText.setVisible(true);
         } else {
-            this.winText = this.add.text(this.scale.width / 2, this.scale.height / 2, msg, {
-                fontFamily: 'system-ui, sans-serif',
-                fontSize: '32px',
-                color: '#fff',
-                backgroundColor: 'rgba(0,0,0,0.7)',
-                padding: { x: 24, y: 16 },
-                align: 'center',
-            }).setOrigin(0.5);
+            this.winText = this.add.text(this.scale.width / 2, this.scale.height / 2, msg, 
+                GameConfig.WIN_TEXT_STYLE as Phaser.Types.GameObjects.Text.TextStyle
+            ).setOrigin(0.5);
         }
         this.isPlanning = false;
         if (this.startButton) this.startButton.disabled = true;
@@ -340,17 +336,13 @@ class Scene extends Phaser.Scene {
             const ui = document.getElementById('ui');
             if (ui) ui.style.display = 'none';
             if (this.welcomeBox) this.welcomeBox.style.display = '';
-        }, 1800);
+        }, GameConfig.REPLAY_DELAY);
     }
 
     private createUi() {
-        this.infoText = this.add.text(16, 16, '', {
-            fontFamily: 'system-ui, sans-serif',
-            fontSize: '13px',
-            color: '#e6e6e6',
-            backgroundColor: 'rgba(11, 11, 15, 0.65)',
-            padding: { x: 10, y: 6 }
-        });
+        this.infoText = this.add.text(16, 16, '', 
+            GameConfig.INFO_TEXT_STYLE as Phaser.Types.GameObjects.Text.TextStyle
+        );
         this.infoText.setScrollFactor(0);
         this.statusEl = document.getElementById('status');
         this.startButton = document.getElementById('start-round') as HTMLButtonElement | null;
@@ -424,7 +416,7 @@ class Scene extends Phaser.Scene {
                 return;
             }
             const distance = Phaser.Math.Distance.Between(this.dragStart.x, this.dragStart.y, pointer.worldX, pointer.worldY);
-            if (distance >= 6 || this.draggingIndicator) {
+            if (distance >= GameConfig.DRAG_START_THRESHOLD || this.draggingIndicator) {
                 this.applyDragAction(this.draggingBot, pointer, this.draggingIndicator);
             }
         });
@@ -435,7 +427,7 @@ class Scene extends Phaser.Scene {
             }
             if (this.isDragging && this.dragStart) {
                 const distance = Phaser.Math.Distance.Between(this.dragStart.x, this.dragStart.y, pointer.worldX, pointer.worldY);
-                const wasTap = distance < 6;
+                const wasTap = distance < GameConfig.DRAG_START_THRESHOLD;
                 if (wasTap && !this.draggingIndicator) {
                     // Re-check which bot is under the pointer for tap reliability
                     const tappedBot = this.getPlayerBotAt(pointer.worldX, pointer.worldY);
@@ -576,10 +568,10 @@ class Scene extends Phaser.Scene {
     private getIndicatorAt(x: number, y: number): { bot: Bot } | undefined {
         // Move indicator: large circle at planned move target
         // Shoot indicator: allow dragging anywhere along the shoot preview line
-        const MOVE_RADIUS = 16 * (window.devicePixelRatio || 1);
+        const MOVE_RADIUS = GameConfig.MOVE_INDICATOR_RADIUS * (window.devicePixelRatio || 1);
         // Make shoot endpoint easier to hit on touch/hi-dpi
-        const SHOOT_RADIUS = 32 * (window.devicePixelRatio || 1);
-        const SHOOT_LINE_TOLERANCE = 18 * (window.devicePixelRatio || 1);
+        const SHOOT_RADIUS = GameConfig.SHOOT_INDICATOR_RADIUS * (window.devicePixelRatio || 1);
+        const SHOOT_LINE_TOLERANCE = GameConfig.SHOOT_LINE_TOLERANCE * (window.devicePixelRatio || 1);
         for (const bot of this.playerBots) {
             if (!bot.isAlive) continue;
             if (bot.selectedMode === 'move' && bot.action.type === 'move' && bot.action.target) {
@@ -592,7 +584,7 @@ class Scene extends Phaser.Scene {
                 const fieldWidth = this.scale.width;
                 const fieldHeight = this.scale.height;
                 const maxBulletDistance = Math.min(fieldWidth, fieldHeight) / 2;
-                const startOffset = 18;
+                const startOffset = GameConfig.SHOT_START_OFFSET;
                 const direction = bot.action.direction.clone().normalize();
                 const start = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y).add(direction.clone().scale(startOffset));
                 const end = start.clone().add(direction.clone().scale(maxBulletDistance));
@@ -676,9 +668,9 @@ class Scene extends Phaser.Scene {
         }
 
         const baseDirection = bot.action.direction.clone().normalize();
-        const spreadDeg = 8; // Small spread in degrees
-        const speed = 420;
-        const startOffset = 18;
+        const spreadDeg = GameConfig.SHOT_SPREAD_DEGREES; // Small spread in degrees
+        const speed = GameConfig.SHOT_SPEED;
+        const startOffset = GameConfig.SHOT_START_OFFSET;
         // Calculate max bullet travel distance as half the smaller game dimension
         const fieldWidth = this.scale.width;
         const fieldHeight = this.scale.height;
@@ -692,14 +684,14 @@ class Scene extends Phaser.Scene {
             const startX = bot.sprite.x + direction.x * startOffset;
             const startY = bot.sprite.y + direction.y * startOffset;
 
-            const particle = this.particles!.get(startX, startY, 'particle') as BulletSprite | null;
+            const particle = this.particles!.get(startX, startY, GameConfig.PARTICLE_TEXTURE) as BulletSprite | null;
             if (!particle) {
                 continue;
             }
 
             particle.setActive(true);
             particle.setVisible(true);
-            particle.setScale(0.18); // Smaller bullet size
+            particle.setScale(GameConfig.PARTICLE_SCALE); // Smaller bullet size
             particle.setDepth(5);
             particle.setCollideWorldBounds(true);
             particle.ownerBot = bot;
@@ -739,7 +731,7 @@ class Scene extends Phaser.Scene {
 
     private getPlayerBotAt(x: number, y: number): Bot | undefined {
         // Adapt tap radius for hi-dpi (retina) displays
-        const BASE_RADIUS = 64;
+        const BASE_RADIUS = GameConfig.TAP_RADIUS_BASE;
         const pixelRatio = window.devicePixelRatio || 1;
         const TAP_RADIUS = Math.max(BASE_RADIUS * pixelRatio, BASE_RADIUS); // Ensure minimum size
         const result = this.playerBots
@@ -768,7 +760,7 @@ class Scene extends Phaser.Scene {
                 return;
             }
             const isMove = bot.action.type === 'move';
-            const color = isMove ? 0x22c55e : 0xf59e0b;
+            const color = isMove ? GameConfig.PLAN_MOVE_COLOR : GameConfig.PLAN_SHOOT_COLOR;
             planGraphics.lineStyle(2, color, 0.7);
             if (isMove) {
                 const target = bot.action.target ?? new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y);
@@ -782,7 +774,7 @@ class Scene extends Phaser.Scene {
                 const fieldWidth = this.scale.width;
                 const fieldHeight = this.scale.height;
                 const maxBulletDistance = Math.min(fieldWidth, fieldHeight) / 2;
-                const startOffset = 18;
+                const startOffset = GameConfig.SHOT_START_OFFSET;
                 const direction = bot.action.direction?.clone().normalize() ?? new Phaser.Math.Vector2(1, 0);
                 // The bullet starts at startOffset from the bot, and travels maxBulletDistance from there
                 const start = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y).add(direction.clone().scale(startOffset));
@@ -810,10 +802,6 @@ class Scene extends Phaser.Scene {
     }
 }
 
-// Fixed aspect ratio (e.g., 16:9)
-const GAME_WIDTH = 1280;
-const GAME_HEIGHT = 720;
-
 const config: Phaser.Types.Core.GameConfig = {
     type: Phaser.AUTO,
     parent: 'game-container',
@@ -830,8 +818,8 @@ const config: Phaser.Types.Core.GameConfig = {
     scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
-        width: GAME_WIDTH,
-        height: GAME_HEIGHT,
+        width: GameConfig.GAME_WIDTH,
+        height: GameConfig.GAME_HEIGHT,
         fullscreenTarget: 'game-container'
     }
 };

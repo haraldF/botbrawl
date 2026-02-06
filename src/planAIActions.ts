@@ -1,4 +1,5 @@
 import type { Bot } from './Bot';
+import { GameConfig } from './GameConfig.js';
 
 export function planAiActions(enemies: Array<Bot>, aiBots: Array<Bot>, barriers: Phaser.Physics.Arcade.StaticGroup, maxMoveDistance: number, shootPreviewLength: number) {
     for (const bot of aiBots) {
@@ -25,7 +26,7 @@ export function planAiActions(enemies: Array<Bot>, aiBots: Array<Bot>, barriers:
         direction.normalize();
 
         // Randomly shoot or move if within shootPreviewLength
-        if (minDist <= shootPreviewLength * 4) {
+        if (minDist <= shootPreviewLength * GameConfig.AI_SHOOT_RANGE_MULTIPLIER) {
             if (Phaser.Math.Between(0, 1) === 0) {
                 bot.action = { type: 'shoot', direction, distance: 0 };
                 continue;
@@ -33,13 +34,13 @@ export function planAiActions(enemies: Array<Bot>, aiBots: Array<Bot>, barriers:
         }
 
         // Otherwise, move
-        let distance = Phaser.Math.Between(60, maxMoveDistance);
+        let distance = Phaser.Math.Between(GameConfig.BOT_SPAWN_PADDING, maxMoveDistance);
         // Try to avoid barriers
         let finalDirection = direction.clone();
         let foundClear = false;
         if (barriers) {
             // Try a wide range of angles (every 15 degrees)
-            for (let angle = 0; angle < 360; angle += 15) {
+            for (let angle = 0; angle < 360; angle += GameConfig.AI_AVOIDANCE_ANGLE_STEP) {
                 const testDir = direction.clone().rotate(Phaser.Math.DegToRad(angle));
                 const testTarget = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y).add(testDir.clone().scale(distance));
                 let collision = false;
@@ -62,7 +63,7 @@ export function planAiActions(enemies: Array<Bot>, aiBots: Array<Bot>, barriers:
                 const randomAngle = Phaser.Math.Between(0, 359);
                 finalDirection = new Phaser.Math.Vector2(1, 0).rotate(Phaser.Math.DegToRad(randomAngle));
                 // Try a short distance to avoid getting stuck
-                distance = Phaser.Math.Between(20, 40);
+                distance = Phaser.Math.Between(GameConfig.AI_WIGGLE_MIN_DISTANCE, GameConfig.AI_WIGGLE_MAX_DISTANCE);
             }
         }
         bot.action = { type: 'move', direction: finalDirection, distance };
