@@ -290,18 +290,9 @@ class Scene extends Phaser.Scene {
         if (!particle.ownerBot) {
             return;
         }
-        // Debug: Log collision details
-        // eslint-disable-next-line no-console
-        console.log('handleBotHit: valid collision', {
-            botId: bot.id,
-            ownerBotId: particle.ownerBot?.id,
-            isSame: particle.ownerBot === bot
-        });
         // Prevent a bot from shooting itself, but allow friendly fire
         const ownerBot = particle.ownerBot;
         if (ownerBot && ownerBot === bot) {
-            // eslint-disable-next-line no-console
-            console.log('Ignored self-hit for bot', bot.id);
             return;
         }
         bot.isAlive = false;
