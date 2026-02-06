@@ -32,6 +32,12 @@ class Scene extends Phaser.Scene {
     private planDirty = true;
 
     create() {
+        this.initPhysics();
+        this.initUi();
+        this.showWelcomeScreen();
+    }
+
+    private initPhysics() {
         this.cameras.main.setBackgroundColor(GameConfig.BACKGROUND_COLOR);
         this.physics.world.setBounds(0, 0, this.scale.width, this.scale.height);
         this.scale.on('resize', (gameSize: Phaser.Structs.Size) => {
@@ -49,8 +55,15 @@ class Scene extends Phaser.Scene {
                 sprite.setVelocity(0, 0);
             }
         });
+    }
 
+    private initUi() {
         this.createUi();
+        const ui = document.getElementById('ui');
+        if (ui) ui.style.display = 'none';
+    }
+
+    private showWelcomeScreen() {
         this.welcomeBox = document.getElementById('welcome-box');
         this.welcomeStartButton = document.getElementById('welcome-start') as HTMLButtonElement | null;
         if (this.welcomeStartButton) {
@@ -58,9 +71,6 @@ class Scene extends Phaser.Scene {
                 this.startGame();
             });
         }
-        // Hide game UI until game starts
-        const ui = document.getElementById('ui');
-        if (ui) ui.style.display = 'none';
         if (this.welcomeBox) this.welcomeBox.style.display = '';
     }
 
@@ -497,41 +507,48 @@ class Scene extends Phaser.Scene {
     }
 
     private applyDragAction(bot: Bot, pointer: Phaser.Input.Pointer, draggingIndicator?: boolean) {
-        // If dragging indicator, set target directly to pointer position
         if (draggingIndicator) {
-            if (bot.selectedMode === 'move') {
-                const origin = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y);
-                const direction = new Phaser.Math.Vector2(pointer.worldX - origin.x, pointer.worldY - origin.y);
-                if (direction.lengthSq() === 0) direction.set(1, 0);
-                direction.normalize();
-                const distance = Math.min(this.maxMoveDistance, Phaser.Math.Distance.Between(origin.x, origin.y, pointer.worldX, pointer.worldY));
-                const clampedTarget = direction.clone().scale(distance).add(origin);
-                bot.action = { type: 'move', direction, distance, target: clampedTarget };
-                bot.plannedMove = {
-                    type: 'move',
-                    direction: direction.clone(),
-                    distance,
-                    target: clampedTarget.clone()
-                };
-            } else if (bot.selectedMode === 'shoot') {
-                const origin = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y);
-                const direction = new Phaser.Math.Vector2(pointer.worldX - origin.x, pointer.worldY - origin.y);
-                if (direction.lengthSq() === 0) direction.set(1, 0);
-                direction.normalize();
-                const target = direction.clone().scale(this.shootPreviewLength).add(origin);
-                bot.action = { type: 'shoot', direction, distance: 0, target };
-                bot.plannedShoot = {
-                    type: 'shoot',
-                    direction: direction.clone(),
-                    distance: 0,
-                    target: target.clone()
-                };
-            }
-            this.planDirty = true;
-            this.updateUi();
-            return;
+            this.applyIndicatorDrag(bot, pointer);
+        } else {
+            this.applyBotDrag(bot, pointer);
         }
-        // ...existing code...
+
+        this.planDirty = true;
+        this.updateUi();
+    }
+
+    private applyIndicatorDrag(bot: Bot, pointer: Phaser.Input.Pointer) {
+        if (bot.selectedMode === 'move') {
+            const origin = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y);
+            const direction = new Phaser.Math.Vector2(pointer.worldX - origin.x, pointer.worldY - origin.y);
+            if (direction.lengthSq() === 0) direction.set(1, 0);
+            direction.normalize();
+            const distance = Math.min(this.maxMoveDistance, Phaser.Math.Distance.Between(origin.x, origin.y, pointer.worldX, pointer.worldY));
+            const clampedTarget = direction.clone().scale(distance).add(origin);
+            bot.action = { type: 'move', direction, distance, target: clampedTarget };
+            bot.plannedMove = {
+                type: 'move',
+                direction: direction.clone(),
+                distance,
+                target: clampedTarget.clone()
+            };
+        } else if (bot.selectedMode === 'shoot') {
+            const origin = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y);
+            const direction = new Phaser.Math.Vector2(pointer.worldX - origin.x, pointer.worldY - origin.y);
+            if (direction.lengthSq() === 0) direction.set(1, 0);
+            direction.normalize();
+            const target = direction.clone().scale(this.shootPreviewLength).add(origin);
+            bot.action = { type: 'shoot', direction, distance: 0, target };
+            bot.plannedShoot = {
+                type: 'shoot',
+                direction: direction.clone(),
+                distance: 0,
+                target: target.clone()
+            };
+        }
+    }
+
+    private applyBotDrag(bot: Bot, pointer: Phaser.Input.Pointer) {
         const direction = new Phaser.Math.Vector2(pointer.worldX - bot.sprite.x, pointer.worldY - bot.sprite.y);
         if (direction.lengthSq() === 0) {
             direction.set(1, 0);
@@ -560,54 +577,61 @@ class Scene extends Phaser.Scene {
                 target: target.clone()
             };
         }
-
-        this.planDirty = true;
-        this.updateUi();
     }
     // Returns the bot and type of indicator hit (move/shoot) if pointer is on an indicator
     private getIndicatorAt(x: number, y: number): { bot: Bot } | undefined {
-        // Move indicator: large circle at planned move target
-        // Shoot indicator: allow dragging anywhere along the shoot preview line
-        const MOVE_RADIUS = GameConfig.MOVE_INDICATOR_RADIUS * (window.devicePixelRatio || 1);
-        // Make shoot endpoint easier to hit on touch/hi-dpi
-        const SHOOT_RADIUS = GameConfig.SHOOT_INDICATOR_RADIUS * (window.devicePixelRatio || 1);
-        const SHOOT_LINE_TOLERANCE = GameConfig.SHOOT_LINE_TOLERANCE * (window.devicePixelRatio || 1);
         for (const bot of this.playerBots) {
             if (!bot.isAlive) continue;
-            if (bot.selectedMode === 'move' && bot.action.type === 'move' && bot.action.target) {
-                const dist = Phaser.Math.Distance.Between(x, y, bot.action.target.x, bot.action.target.y);
-                if (dist <= MOVE_RADIUS) {
-                    return { bot };
-                }
-            } else if (bot.selectedMode === 'shoot' && bot.action.type === 'shoot' && bot.action.target && bot.action.direction) {
-                // Calculate the actual endpoint as in renderPlans
-                const fieldWidth = this.scale.width;
-                const fieldHeight = this.scale.height;
-                const maxBulletDistance = Math.min(fieldWidth, fieldHeight) / 2;
-                const startOffset = GameConfig.SHOT_START_OFFSET;
-                const direction = bot.action.direction.clone().normalize();
-                const start = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y).add(direction.clone().scale(startOffset));
-                const end = start.clone().add(direction.clone().scale(maxBulletDistance));
-                // Check endpoint first
-                const endDist = Phaser.Math.Distance.Between(x, y, end.x, end.y);
-                if (endDist <= SHOOT_RADIUS) {
-                    return { bot };
-                }
-                // Check if pointer is near the shoot line
-                const lineLength = Phaser.Math.Distance.Between(start.x, start.y, end.x, end.y);
-                if (lineLength < 1) continue;
-                // Project pointer onto line segment
-                const toPointer = new Phaser.Math.Vector2(x - start.x, y - start.y);
-                const lineDir = new Phaser.Math.Vector2(end.x - start.x, end.y - start.y).normalize();
-                const proj = Phaser.Math.Clamp(toPointer.dot(lineDir), 0, lineLength);
-                const closest = new Phaser.Math.Vector2(start.x + lineDir.x * proj, start.y + lineDir.y * proj);
-                const distToLine = Phaser.Math.Distance.Between(x, y, closest.x, closest.y);
-                if (distToLine <= SHOOT_LINE_TOLERANCE) {
-                    return { bot };
-                }
+
+            if (bot.selectedMode === 'move' && this.isOverMoveIndicator(bot, x, y)) {
+                return { bot };
+            } else if (bot.selectedMode === 'shoot' && this.isOverShootIndicator(bot, x, y)) {
+                return { bot };
             }
         }
         return undefined;
+    }
+
+    private isOverMoveIndicator(bot: Bot, x: number, y: number): boolean {
+        if (bot.action.type === 'move' && bot.action.target) {
+            const MOVE_RADIUS = GameConfig.MOVE_INDICATOR_RADIUS * (window.devicePixelRatio || 1);
+            const dist = Phaser.Math.Distance.Between(x, y, bot.action.target.x, bot.action.target.y);
+            return dist <= MOVE_RADIUS;
+        }
+        return false;
+    }
+
+    private isOverShootIndicator(bot: Bot, x: number, y: number): boolean {
+        if (bot.action.type === 'shoot' && bot.action.target && bot.action.direction) {
+            const SHOOT_RADIUS = GameConfig.SHOOT_INDICATOR_RADIUS * (window.devicePixelRatio || 1);
+            const SHOOT_LINE_TOLERANCE = GameConfig.SHOOT_LINE_TOLERANCE * (window.devicePixelRatio || 1);
+
+            const fieldWidth = this.scale.width;
+            const fieldHeight = this.scale.height;
+            const maxBulletDistance = Math.min(fieldWidth, fieldHeight) / 2;
+            const startOffset = GameConfig.SHOT_START_OFFSET;
+            const direction = bot.action.direction.clone().normalize();
+            const start = new Phaser.Math.Vector2(bot.sprite.x, bot.sprite.y).add(direction.clone().scale(startOffset));
+            const end = start.clone().add(direction.clone().scale(maxBulletDistance));
+
+            // Check endpoint first
+            const endDist = Phaser.Math.Distance.Between(x, y, end.x, end.y);
+            if (endDist <= SHOOT_RADIUS) {
+                return true;
+            }
+
+            // Check if pointer is near the shoot line
+            const lineLength = Phaser.Math.Distance.Between(start.x, start.y, end.x, end.y);
+            if (lineLength < 1) return false;
+
+            const toPointer = new Phaser.Math.Vector2(x - start.x, y - start.y);
+            const lineDir = new Phaser.Math.Vector2(end.x - start.x, end.y - start.y).normalize();
+            const proj = Phaser.Math.Clamp(toPointer.dot(lineDir), 0, lineLength);
+            const closest = new Phaser.Math.Vector2(start.x + lineDir.x * proj, start.y + lineDir.y * proj);
+            const distToLine = Phaser.Math.Distance.Between(x, y, closest.x, closest.y);
+            return distToLine <= SHOOT_LINE_TOLERANCE;
+        }
+        return false;
     }
 
     private startRound() {
