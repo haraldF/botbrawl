@@ -9,11 +9,11 @@
     "build": "tsc"
   },
   "keywords": [],
-  "author": "",
+  "author": "Harald Fernengel <harryf@gmx.com>",
   "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.2"
   },
   "dependencies": {
     "phaser": "^3.90.0"
