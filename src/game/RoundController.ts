@@ -26,7 +26,8 @@ export class RoundController {
             deps.aiBots,
             deps.barriers,
             GameConfig.MAX_MOVE_DISTANCE,
-            GameConfig.SHOOT_PREVIEW_LENGTH
+            GameConfig.SHOOT_PREVIEW_LENGTH,
+            GameConfig.SNIPER_PREVIEW_LENGTH
         );
         this.executeActions(deps.allBots);
         this.scene.time.delayedCall(this.roundDurationMs, () => {
