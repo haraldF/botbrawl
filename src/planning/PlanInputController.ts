@@ -102,7 +102,7 @@ export class PlanInputController {
         let bestDistance = tapRadius + 1;
 
         for (const bot of this.ctx.getPlayerBots()) {
-            if (!bot.isAlive) continue;
+            if (!bot.isAlive || bot.isDisabled) continue;
             const distance = Phaser.Math.Distance.Between(x, y, bot.sprite.x, bot.sprite.y);
             if (distance <= tapRadius && distance < bestDistance) {
                 best = bot;

@@ -1,4 +1,4 @@
-export type ActionType = 'move' | 'shoot' | 'none';
+export type ActionType = 'move' | 'shoot' | 'sniper' | 'none';
 
 export type BotAction = {
     type: ActionType;
@@ -13,8 +13,10 @@ export type Bot = {
     playerId: 1 | 2;
     action: BotAction;
     isAlive: boolean;
+    isDisabled: boolean;
     selectedMode: Exclude<ActionType, 'none'>;
     plannedMove?: BotAction;
     plannedShoot?: BotAction;
+    plannedSniper?: BotAction;
 };
 

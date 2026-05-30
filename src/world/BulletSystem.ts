@@ -54,6 +54,28 @@ export class BulletSystem {
         }
     }
 
+    spawnSniperShot(bot: Bot): void {
+        if (!this.particles) return;
+
+        const baseDirection = bot.action.direction.clone().normalize();
+        const speed = GameConfig.SHOT_SPEED;
+        const startOffset = GameConfig.SHOT_START_OFFSET;
+        const baseRange = Math.min(this.scene.scale.width, this.scene.scale.height) / 2;
+        const maxBulletDistance = baseRange * GameConfig.SNIPER_RANGE_MULTIPLIER;
+        const lifetimeMs = (maxBulletDistance / speed) * 1000;
+
+        for (let i = 0; i < GameConfig.SNIPER_BULLETS_PER_SHOT; i++) {
+            const spread = GameConfig.SNIPER_SHOT_SPREAD_DEGREES === 0
+                ? 0
+                : Phaser.Math.FloatBetween(
+                    -GameConfig.SNIPER_SHOT_SPREAD_DEGREES,
+                    GameConfig.SNIPER_SHOT_SPREAD_DEGREES
+                );
+            const direction = baseDirection.clone().rotate(Phaser.Math.DegToRad(spread));
+            this.spawnBullet(bot, direction, startOffset, speed, lifetimeMs);
+        }
+    }
+
     destroyBullet(bullet: BulletSprite): void {
         if (!bullet.active) return;
         delete bullet.ownerBot;

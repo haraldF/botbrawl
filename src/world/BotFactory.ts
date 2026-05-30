@@ -66,6 +66,7 @@ export class BotFactory {
             playerId,
             action: initialAction,
             isAlive: true,
+            isDisabled: false,
             selectedMode: 'move',
         };
     }

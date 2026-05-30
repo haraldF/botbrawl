@@ -4,12 +4,18 @@ import type { Bot, BotAction } from '../Bot.js';
 export class ActionPlanner {
     constructor(
         private readonly maxMoveDistance: number,
-        private readonly shootPreviewLength: number
+        private readonly shootPreviewLength: number,
+        private readonly sniperPreviewLength: number
     ) {}
 
-    /** Switch between move/shoot mode, restoring the previously planned action for that mode. */
+    /** Cycle through move -> shoot -> sniper, restoring the previously planned action for that mode. */
     toggleMode(bot: Bot): void {
-        bot.selectedMode = bot.selectedMode === 'move' ? 'shoot' : 'move';
+        // First tap on an unplanned bot just commits the current (default) mode rather than cycling.
+        if (bot.action.type !== 'none') {
+            const order: Array<Exclude<BotAction['type'], 'none'>> = ['move', 'shoot', 'sniper'];
+            const next = order[(order.indexOf(bot.selectedMode) + 1) % order.length]!;
+            bot.selectedMode = next;
+        }
         this.syncActionWithMode(bot);
     }
 
@@ -24,13 +30,15 @@ export class ActionPlanner {
                 Phaser.Math.Distance.Between(origin.x, origin.y, pointerX, pointerY)
             );
             this.assignMoveAction(bot, origin, direction, distance);
-        } else {
+        } else if (bot.selectedMode === 'shoot') {
             this.assignShootAction(bot, origin, direction);
+        } else {
+            this.assignSniperAction(bot, origin, direction);
         }
     }
 
     private syncActionWithMode(bot: Bot): void {
-        const previouslyPlanned = bot.selectedMode === 'move' ? bot.plannedMove : bot.plannedShoot;
+        const previouslyPlanned = this.plannedForMode(bot);
         if (previouslyPlanned) {
             bot.action = this.cloneAction(previouslyPlanned);
             return;
@@ -48,9 +56,17 @@ export class ActionPlanner {
                 Phaser.Math.Distance.Between(origin.x, origin.y, fallbackTarget.x, fallbackTarget.y)
             );
             this.assignMoveAction(bot, origin, direction, distance);
-        } else {
+        } else if (bot.selectedMode === 'shoot') {
             this.assignShootAction(bot, origin, direction);
+        } else {
+            this.assignSniperAction(bot, origin, direction);
         }
+    }
+
+    private plannedForMode(bot: Bot): BotAction | undefined {
+        if (bot.selectedMode === 'move') return bot.plannedMove;
+        if (bot.selectedMode === 'shoot') return bot.plannedShoot;
+        return bot.plannedSniper;
     }
 
     private assignMoveAction(
@@ -84,6 +100,22 @@ export class ActionPlanner {
         };
         bot.action = action;
         bot.plannedShoot = this.cloneAction(action);
+    }
+
+    private assignSniperAction(
+        bot: Bot,
+        origin: Phaser.Math.Vector2,
+        direction: Phaser.Math.Vector2
+    ): void {
+        const target = origin.clone().add(direction.clone().scale(this.sniperPreviewLength));
+        const action: BotAction = {
+            type: 'sniper',
+            direction: direction.clone(),
+            distance: 0,
+            target,
+        };
+        bot.action = action;
+        bot.plannedSniper = this.cloneAction(action);
     }
 
     private cloneAction(action: BotAction): BotAction {

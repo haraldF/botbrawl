@@ -14,8 +14,6 @@ import { TextureFactory } from '../world/TextureFactory.js';
 import { DomUi } from '../ui/DomUi.js';
 import { Hud } from '../ui/Hud.js';
 
-const TEAM_SIZE = 5;
-
 /** Orchestrates all game subsystems. Holds shared state; delegates work. */
 export class GameScene extends Phaser.Scene {
     private bots: Bot[] = [];
@@ -70,7 +68,11 @@ export class GameScene extends Phaser.Scene {
         this.barrierFactory = new BarrierFactory(this);
         this.botFactory = new BotFactory(this);
         this.bullets = new BulletSystem(this);
-        this.planner = new ActionPlanner(GameConfig.MAX_MOVE_DISTANCE, GameConfig.SHOOT_PREVIEW_LENGTH);
+        this.planner = new ActionPlanner(
+            GameConfig.MAX_MOVE_DISTANCE,
+            GameConfig.SHOOT_PREVIEW_LENGTH,
+            GameConfig.SNIPER_PREVIEW_LENGTH
+        );
         this.planRenderer = new PlanRenderer(this);
         this.roundController = new RoundController(this, this.bullets);
         this.hud = new Hud(this);
@@ -191,14 +193,17 @@ export class GameScene extends Phaser.Scene {
     }
 
     private refreshUi(): void {
-        const plannedCount = this.player1Bots.filter(bot => bot.action.type !== 'none').length;
+        const actionable = this.player1Bots.filter(bot => !bot.isDisabled);
+        const plannedCount = actionable.filter(bot => bot.action.type !== 'none').length;
+        const disabledCount = this.player1Bots.length - actionable.length;
+        const disabledSuffix = disabledCount > 0 ? ` (${disabledCount} reloading)` : '';
         const statusLine = this.isPlanning
-            ? `Planned: ${plannedCount}/${TEAM_SIZE}`
+            ? `Planned: ${plannedCount}/${actionable.length}${disabledSuffix}`
             : 'Executing round...';
         this.hud.setInfo([
-            `Planned: ${plannedCount}/${TEAM_SIZE}`,
+            statusLine,
             this.isPlanning
-                ? 'Drag from a bot to set move/shoot. Tap bot to switch mode.'
+                ? 'Drag from a bot to set move/shoot/sniper. Tap bot to cycle modes.'
                 : 'Executing round...',
         ]);
         this.domUi.setStatus(statusLine);
