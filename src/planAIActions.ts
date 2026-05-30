@@ -22,9 +22,25 @@ export function planAiActions(
     sniperPreviewLength: number = GameConfig.SNIPER_PREVIEW_LENGTH
 ) {
     const liveEnemies = enemies.filter(e => e.isAlive && !e.isDisabled);
+    const eligibleAi = aiBots.filter(b => b.isAlive && !b.isDisabled);
+    const shootRange = computeShotRange();
+    const sniperRange = computeSniperRange();
 
-    for (const bot of aiBots) {
-        if (!bot.isAlive || bot.isDisabled) continue;
+    // Disabled enemies just sniped and are sitting ducks for one turn — prioritize a snipe on them,
+    // but only let ONE bot per turn take the sniper shot (it disables the shooter for the next turn).
+    const sniperShooter = pickSniperOpportunity(enemies, eligibleAi, aiBots, barriers, sniperRange);
+    const planned = new Set<Bot>();
+    if (sniperShooter) {
+        sniperShooter.bot.action = {
+            type: 'sniper',
+            direction: sniperShooter.direction,
+            distance: 0,
+        };
+        planned.add(sniperShooter.bot);
+    }
+
+    for (const bot of eligibleAi) {
+        if (planned.has(bot)) continue;
 
         // Find the closest live enemy
         let target: Bot | null = null;
@@ -49,19 +65,12 @@ export function planAiActions(
         }
         direction.normalize();
 
-        const shootRange = computeShotRange();
-        const sniperRange = computeSniperRange();
         const allies = aiBots.filter(a => a !== bot && a.isAlive);
         const exposed = hasClearLineOfSight(bot, target, barriers)
             && !wouldHitAlly(bot, direction, minDist, allies);
 
-        // Prefer sniper if enemy is exposed and within sniper range
-        if (exposed && minDist <= sniperRange && minDist > shootRange) {            bot.action = { type: 'sniper', direction, distance: 0 };
-            continue;
-        }
-
         // Within close range: occasionally shoot, otherwise move.
-        // Prefer normal shot over sniper here — sniper disables the shooter for one turn.
+        // Sniper is reserved for the dedicated sniper opportunity picked above.
         if (exposed && minDist <= shootRange) {
             if (Phaser.Math.Between(0, 1) === 0) {
                 bot.action = { type: 'shoot', direction, distance: 0 };
@@ -73,6 +82,41 @@ export function planAiActions(
         const moveAction = planCoverSeekingMove(bot, target, liveEnemies, barriers, maxMoveDistance);
         bot.action = moveAction;
     }
+}
+
+/**
+ * Find the best (shooter, disabled-enemy) sniper pair across all AI bots, or null if none viable.
+ * Prefers the shortest viable shot to maximize hit chance.
+ */
+function pickSniperOpportunity(
+    enemies: Array<Bot>,
+    eligibleAi: Array<Bot>,
+    allAi: Array<Bot>,
+    barriers: Barriers,
+    sniperRange: number
+): { bot: Bot; direction: Phaser.Math.Vector2 } | null {
+    const disabledEnemies = enemies.filter(e => e.isAlive && e.isDisabled);
+    if (disabledEnemies.length === 0 || eligibleAi.length === 0) return null;
+
+    let best: { bot: Bot; direction: Phaser.Math.Vector2; dist: number } | null = null;
+    for (const shooter of eligibleAi) {
+        const allies = allAi.filter(a => a !== shooter && a.isAlive);
+        for (const enemy of disabledEnemies) {
+            const dx = enemy.sprite.x - shooter.sprite.x;
+            const dy = enemy.sprite.y - shooter.sprite.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist === 0 || dist > sniperRange) continue;
+            if (!hasClearLineOfSight(shooter, enemy, barriers)) continue;
+
+            const direction = new Phaser.Math.Vector2(dx / dist, dy / dist);
+            if (wouldHitAlly(shooter, direction, dist, allies)) continue;
+
+            if (!best || dist < best.dist) {
+                best = { bot: shooter, direction, dist };
+            }
+        }
+    }
+    return best ? { bot: best.bot, direction: best.direction } : null;
 }
 
 /**
