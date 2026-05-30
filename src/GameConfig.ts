@@ -1,4 +1,5 @@
 export const GameConfig = {
+    CLIENT_VERSION: '0.0.1',
     GAME_WIDTH: 1280,
     GAME_HEIGHT: 720,
     BACKGROUND_COLOR: '#0b0b0f',

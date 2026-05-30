@@ -1,6 +1,8 @@
 import { GameConfig } from './GameConfig.js';
 import type { Bot, BotAction } from './Bot';
 import { planAiActions } from './planAIActions.js';
+import { Server } from './Server.js';
+import type { BotPosition, GameState } from './types.js';
 
 type BulletSprite = Phaser.Physics.Arcade.Image & {
     ownerBot?: Bot;
@@ -12,8 +14,8 @@ class Scene extends Phaser.Scene {
     private winText?: Phaser.GameObjects.Text;
     private barriers?: Phaser.Physics.Arcade.StaticGroup;
     private bots: Bot[] = [];
-    private playerBots: Bot[] = [];
-    private aiBots: Bot[] = [];
+    private player1Bots: Bot[] = [];
+    private player2Bots: Bot[] = [];
     private maxMoveDistance = GameConfig.MAX_MOVE_DISTANCE;
     private shootPreviewLength = GameConfig.SHOOT_PREVIEW_LENGTH;
     private roundDurationMs = GameConfig.ROUND_DURATION_MS;
@@ -31,11 +33,64 @@ class Scene extends Phaser.Scene {
     private dragStart: Phaser.Math.Vector2 | undefined;
     private draggingIndicator: boolean = false;
     private planDirty = true;
+    private server?: Server;
 
     create() {
+        const params = new URLSearchParams(window.location.search);
+        const serverUrl = params.get('server');
+        if (serverUrl !== null) {
+            const server = this.server = new Server(serverUrl);
+            const gameId = params.get('gameId');
+            if (gameId) {
+                // TODO - show spinner or something while loading game state
+                server.joinGame(gameId).then(() => {
+                     const gameState = server.gameState;
+                    if (gameState) {
+                        this.startGame();
+                        this.applyGameState(gameState);
+                    }
+                });
+            }
+        }
+
         this.initPhysics();
         this.initUi();
         this.showWelcomeScreen();
+
+        console.log("this.server:", this.server, "this.server.gameId:", this.server?.gameId);
+        if (this.server && this.server.gameId === undefined) {
+            console.log("starting new game...");
+            this.startGame();
+            this.server.startGame(this.barriers!, this.player1Bots, this.player2Bots);
+        }
+    }
+
+    private applyGameState(gameState: GameState) {
+        const barriers = this.barriers;
+        if (!barriers || gameState.barrierPositions.length !== barriers.getLength()) {
+            throw new Error('Game state barrier count does not match current barriers');
+        }
+
+        for (let i = 0; i < gameState.barrierPositions.length; ++i) {
+            const barrier = barriers.get() as Phaser.Physics.Arcade.Image;
+            const pos = gameState.barrierPositions[i]!;
+            barrier.setPosition(pos.x, pos.y);
+        }
+
+        const applyBotState = (playerBots: Bot[], botStates: BotPosition[]) => {
+            for (let i = 0; i < playerBots.length; ++i) {
+                const bot = playerBots[i]!;
+                const botState = botStates.find(state => state.botId === bot.id);
+                if (!botState) {
+                    bot.isAlive = false;
+                } else {
+                    bot.sprite.setPosition(botState.x, botState.y);
+                }
+            }
+        }
+
+        applyBotState(this.player1Bots, gameState.player1BotPositions);
+        applyBotState(this.player2Bots, gameState.player2BotPositions);
     }
 
     private initPhysics() {
@@ -93,8 +148,8 @@ class Scene extends Phaser.Scene {
         // Remove all bots, barriers, particles
         this.bots.forEach(bot => bot.sprite.destroy());
         this.bots = [];
-        this.playerBots = [];
-        this.aiBots = [];
+        this.player1Bots = [];
+        this.player2Bots = [];
         if (this.barriers) {
             this.barriers.clear(true, true);
         }
@@ -185,16 +240,16 @@ class Scene extends Phaser.Scene {
         };
 
         for (let i = 0; i < 5; i += 1) {
-            const y = findNonOverlappingY(leftX, this.playerBots);
+            const y = findNonOverlappingY(leftX, this.player1Bots);
             const bot = this.createBot(leftX, y, 1, GameConfig.BOT_PLAYER_TEXTURE);
-            this.playerBots.push(bot);
+            this.player1Bots.push(bot);
             this.bots.push(bot);
         }
 
         for (let i = 0; i < 5; i += 1) {
-            const y = findNonOverlappingY(rightX, this.aiBots.concat(this.playerBots));
+            const y = findNonOverlappingY(rightX, this.player2Bots.concat(this.player1Bots));
             const bot = this.createBot(rightX, y, 2, GameConfig.BOT_AI_TEXTURE);
-            this.aiBots.push(bot);
+            this.player2Bots.push(bot);
             this.bots.push(bot);
         }
 
@@ -310,17 +365,17 @@ class Scene extends Phaser.Scene {
         // Remove from bot arrays
         this.bots = this.bots.filter(b => b !== bot);
         if (bot.playerId === 1) {
-            this.playerBots = this.playerBots.filter(b => b !== bot);
+            this.player1Bots = this.player1Bots.filter(b => b !== bot);
         } else {
-            this.aiBots = this.aiBots.filter(b => b !== bot);
+            this.player2Bots = this.player2Bots.filter(b => b !== bot);
         }
         this.checkWinCondition();
     }
 
     private checkWinCondition() {
-        if (this.aiBots.length === 0) {
+        if (this.player2Bots.length === 0) {
             this.showWinMessage('You win!');
-        } else if (this.playerBots.length === 0) {
+        } else if (this.player1Bots.length === 0) {
             this.showWinMessage('You lose!');
         }
     }
@@ -330,7 +385,7 @@ class Scene extends Phaser.Scene {
             this.winText.setText(msg);
             this.winText.setVisible(true);
         } else {
-            this.winText = this.add.text(this.scale.width / 2, this.scale.height / 2, msg, 
+            this.winText = this.add.text(this.scale.width / 2, this.scale.height / 2, msg,
                 GameConfig.WIN_TEXT_STYLE as Phaser.Types.GameObjects.Text.TextStyle
             ).setOrigin(0.5);
         }
@@ -346,7 +401,7 @@ class Scene extends Phaser.Scene {
     }
 
     private createUi() {
-        this.infoText = this.add.text(16, 16, '', 
+        this.infoText = this.add.text(16, 16, '',
             GameConfig.INFO_TEXT_STYLE as Phaser.Types.GameObjects.Text.TextStyle
         );
         this.infoText.setScrollFactor(0);
@@ -580,10 +635,10 @@ class Scene extends Phaser.Scene {
     private startRound() {
         this.isPlanning = false;
         // Revert all player bot sizes to normal at round start
-        this.playerBots.forEach((bot) => {
+        this.player1Bots.forEach((bot) => {
             bot.sprite.setScale(1);
         });
-        planAiActions(this.playerBots, this.aiBots, this.barriers!, this.maxMoveDistance, this.shootPreviewLength);
+        planAiActions(this.player1Bots, this.player2Bots, this.barriers!, this.maxMoveDistance, this.shootPreviewLength);
         this.executeActions();
         this.clearPlanGraphics();
         this.updateUi();
@@ -676,7 +731,7 @@ class Scene extends Phaser.Scene {
     // Removed highlightSelected and updateSelectionRing
 
     private updateUi() {
-        const plannedCount = this.playerBots.filter((bot) => bot.action.type !== 'none').length;
+        const plannedCount = this.player1Bots.filter((bot) => bot.action.type !== 'none').length;
         if (this.infoText) {
             const instructions = [
                 `Planned: ${plannedCount}/5`,
@@ -701,7 +756,7 @@ class Scene extends Phaser.Scene {
         const BASE_RADIUS = GameConfig.TAP_RADIUS_BASE;
         const pixelRatio = window.devicePixelRatio || 1;
         const TAP_RADIUS = Math.max(BASE_RADIUS * pixelRatio, BASE_RADIUS); // Ensure minimum size
-        const result = this.playerBots
+        const result = this.player1Bots
             .filter(bot => bot.isAlive)
             .reduce<{ bot: Bot | undefined; dist: number }>(
                 (acc, bot) => {
@@ -724,7 +779,7 @@ class Scene extends Phaser.Scene {
         planGraphics.clear();
         this.indicators.clear(true, true);
 
-        this.playerBots.forEach((bot) => {
+        this.player1Bots.forEach((bot) => {
             if (bot.action.type === 'none') {
                 return;
             }

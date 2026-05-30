@@ -1,27 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import * as http from 'node:http';
+import type { BotMove, Move, NewGameRequest, GameState } from '../src/types.js';
 
-const PORT = parseInt(process.env.BOTBRAWL_MULTIPLAYER_SERVER_PORT ?? "3000");
+const PORT = parseInt(process.env.BOTBRAWL_MULTIPLAYER_SERVER_PORT ?? "3001");
 const LongPollTimeout = 30 * 1000; // 30 seconds
 
-interface BotMove {
-    botId: number;
-    direction: number;
-    mode: 'shoot' | 'move';
-}
+type Callback = () => void;
 
-interface Move {
-    playerId: number;
-    moveId: number;
-    moves: BotMove[];
-}
-
-interface Game {
+interface Game extends GameState {
     lastActivity: number;
-    moveId: number;
     player1Move?: Move;
     player2Move?: Move;
-    listeners: Set<() => void>;
+
+    // Set of callbacks to notify when any move is received
+    listeners: Set<Callback>;
+}
+
+function isNewGameRequest(obj: any): obj is NewGameRequest {
+    return typeof obj === 'object' &&
+        typeof obj.clientVersion === 'string' &&
+        Array.isArray(obj.barrierPositions) &&
+        obj.barrierPositions.every((bp: any) => typeof bp.x === 'number' && typeof bp.y === 'number') &&
+        Array.isArray(obj.player1BotPositions) &&
+        obj.player1BotPositions.every((bp: any) => typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number') &&
+        Array.isArray(obj.player2BotPositions) &&
+        obj.player2BotPositions.every((bp: any) => typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number');
 }
 
 interface GameError extends Error
@@ -112,10 +115,17 @@ async function health()
     return { message: 'OK' };
 }
 
-async function newGame()
+async function newGame(newGameRequest: NewGameRequest)
 {
     const gameId = randomUUID();
-    games.set(gameId, { lastActivity: Date.now(), moveId: 0, listeners: new Set() });
+    games.set(gameId, {
+        lastActivity: Date.now(),
+        moveId: 0,
+        listeners: new Set(),
+        barrierPositions: newGameRequest.barrierPositions.map(bp => ({ x: bp.x, y: bp.y })),
+        player1BotPositions: newGameRequest.player1BotPositions.map(bp => ({ botId: bp.botId, x: bp.x, y: bp.y })),
+        player2BotPositions: newGameRequest.player2BotPositions.map(bp => ({ botId: bp.botId, x: bp.x, y: bp.y }))
+    });
 
     return { message: { gameId } };
  }
@@ -128,6 +138,18 @@ async function deleteGame(gameId: string)
     games.delete(gameId);
 
     return { message: 'Game deleted' };
+}
+
+async function gameState(game: Game)
+{
+    return {
+        message: {
+            moveId: game.moveId,
+            barrierPositions: game.barrierPositions,
+            player1BotPositions: game.player1BotPositions,
+            player2BotPositions: game.player2BotPositions
+        }
+    };
 }
 
 async function handleMove(gameId: string, move: Move)
@@ -166,7 +188,11 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
 
     if (req.method === 'POST' && url.pathname === '/botbrawl/game') {
-        return await newGame();
+        const newGameRequest = await toJson(req);
+        if (!isNewGameRequest(newGameRequest)) {
+            throw { statusCode: 400, message: 'Invalid New Game Request format' };
+        }
+        return await newGame(newGameRequest);
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/botbrawl/game/')) {
@@ -174,8 +200,18 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         return await deleteGame(gameId);
     }
 
-    if (req.method === 'POST' && url.pathname.startsWith('/botbrawl/game/')) {
-        const gameId = url.pathname.split('/')[3] ?? '';
+    if (req.method === 'GET' && url.pathname.startsWith('/botbrawl/game/state/')) {
+        const gameId = url.pathname.split('/')[4] ?? '';
+        const game = games.get(gameId);
+        if (!game) {
+            throw { statusCode: 404, message: 'Game not found' };
+        }
+
+        return await gameState(game);
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/botbrawl/game/move/')) {
+        const gameId = url.pathname.split('/')[4] ?? '';
         const move = await toJson(req);
         if (!isMoves(move)) {
             throw { statusCode: 400, message: 'Invalid Move format' };
@@ -184,8 +220,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         return await handleMove(gameId, move);
     }
 
-    if (req.method === 'GET' && url.pathname.startsWith('/botbrawl/game/')) {
-        const gameId = url.pathname.split('/')[3] ?? '';
+    if (req.method === 'GET' && url.pathname.startsWith('/botbrawl/game/move/')) {
+        const gameId = url.pathname.split('/')[4] ?? '';
         const game = games.get(gameId);
         if (!game) {
             throw { statusCode: 404, message: 'Game not found' };
@@ -201,13 +237,19 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     throw { statusCode: 404, message: 'Not Found' };
 }
 
+function addCorsHeaders(res: http.ServerResponse)
+{
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
 const server = http.createServer(async (req, res) => {
     try {
         console.log(`Received request: ${req.method} ${req.url}`);
 
         if (req.method === 'OPTIONS') {
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+            addCorsHeaders(res);
             res.statusCode = 204;
             res.end();
             return;
@@ -216,21 +258,22 @@ const server = http.createServer(async (req, res) => {
         const response = await handleRequest(req, res);
         if (typeof response.message === 'object') {
             res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Access-Control-Allow-Origin', '*');
+            addCorsHeaders(res);
             res.end(JSON.stringify(response.message));
         } else {
             res.setHeader('Content-Type', 'text/plain');
-            res.setHeader('Access-Control-Allow-Origin', '*');
+            addCorsHeaders(res);
             res.end(response.message);
         }
     } catch (error) {
         console.error('Error handling request:', error);
         if (isGameError(error)) {
-            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Content-Type', 'text/plain');
+            addCorsHeaders(res);
             res.statusCode = error.statusCode;
             res.end(error.message);
         } else {
-            res.setHeader('Access-Control-Allow-Origin', '*');
+            addCorsHeaders(res);
             res.statusCode = 500; // Internal Server Error
             res.end();
         }
