@@ -1,11 +1,12 @@
 import { GameConfig } from './GameConfig.js';
 import type { Bot } from './Bot.js';
-import type { GameState, NewGameRequest } from './types.js';
+import type { BotMove, GameState, Move, NewGameRequest, RoundMovesResponse } from './types.js';
 
 export class Server {
 
     public gameId?: string = undefined;
     public gameState?: GameState = undefined;
+    public playerId: 1 | 2 = 1;
 
     constructor(public readonly url: string) {
     }
@@ -16,6 +17,7 @@ export class Server {
             throw new Error(`Failed to join game: ${response.status} ${response.statusText}`);
         }
         this.gameId = gameId;
+        this.playerId = 2;
 
         console.log("Joined game with ID:", this.gameId);
 
@@ -59,7 +61,42 @@ export class Server {
 
         const data = await response.json();
         this.gameId = data.gameId;
+        this.playerId = 1;
 
         console.log("Started new game with ID:", this.gameId);
     }
+
+    /** Submit this player's moves for the given round. */
+    async submitMove(moveId: number, moves: BotMove[]): Promise<void> {
+        if (!this.gameId) throw new Error('Cannot submit move: no active game');
+        const payload: Move = { playerId: this.playerId, moveId, moves };
+        const response = await fetch(`${this.url}/botbrawl/game/move/${this.gameId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to submit move: ${response.status} ${response.statusText}`);
+        }
+    }
+
+    /**
+     * Long-poll until both players have submitted moves for the given round.
+     * Retries on timeout (504) until moves are available.
+     */
+    async waitForRoundMoves(moveId: number): Promise<RoundMovesResponse> {
+        if (!this.gameId) throw new Error('Cannot wait for moves: no active game');
+        while (true) {
+            const response = await fetch(`${this.url}/botbrawl/game/move/${this.gameId}?moveId=${moveId}`);
+            if (response.ok) {
+                return await response.json();
+            }
+            if (response.status === 504) {
+                // Long-poll timeout, retry.
+                continue;
+            }
+            throw new Error(`Failed to fetch round moves: ${response.status} ${response.statusText}`);
+        }
+    }
 }
+

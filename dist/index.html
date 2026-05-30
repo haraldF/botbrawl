@@ -12,8 +12,35 @@
 			<div id="welcome-box" class="overlay-box">
 				<h1>Welcome to Bot Brawl</h1>
 				<p>Every round, your bot can either move, shoot or snipe. Tap on a bot to change its mode, and tap & drag to choose the direction. After sniping, the bot is inactive for one round.</p>
-				<button id="welcome-start" type="button">Start Game</button>
+				<button id="welcome-start" type="button">Single Player</button>
+				<div id="multiplayer-panel">
+					<h2>Multiplayer</h2>
+					<label for="game-url">Game URL</label>
+					<input id="game-url" type="text" autocomplete="off" placeholder="Paste or share a game URL" />
+					<div class="multiplayer-actions">
+						<button id="multiplayer-create" type="button">Create Game</button>
+						<button id="multiplayer-join" type="button">Join Game</button>
+					</div>
+					<div id="lobby-status" aria-live="polite"></div>
+					<div id="create-spinner" style="display:none;align-items:center;gap:8px;margin-top:10px;">
+						<span class="spinner" style="display:inline-block;width:20px;height:20px;border:3px solid #ccc;border-top:3px solid #333;border-radius:50%;animation:spin 1s linear infinite;"></span>
+						<span>Creating game...</span>
+						<button id="create-cancel" type="button">Cancel</button>
+					</div>
+				</div>
+				<style>
+				@keyframes spin {
+					0% { transform: rotate(0deg); }
+					100% { transform: rotate(360deg); }
+				}
+				</style>
 				<p class="version-info">Version: <span id="git-version">__GIT_COMMIT_HASH__</span></p>
+			</div>
+			<div id="share-box" class="share-overlay" style="display:none;">
+				<button id="share-close" class="share-close" type="button" aria-label="Close">×</button>
+				<p>Share this link with your opponent:</p>
+				<a id="share-link" target="_blank" rel="noopener"></a>
+				<p class="waiting">Waiting for opponent — start your first round to wait for them.</p>
 			</div>
 			<div id="ui" style="display:none;">
 				<div id="status">Tap a bot to select, tap again to toggle shoot. Drag to set move or shoot.</div>

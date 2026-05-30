@@ -36,6 +36,120 @@
 #welcome-box button:active {
   transform: scale(0.98);
 }
+
+#multiplayer-panel {
+  margin-top: 1.5em;
+  width: min(420px, 90vw);
+  border-top: 1px solid rgba(255,255,255,0.12);
+  padding-top: 1em;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+#multiplayer-panel h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #60a5fa;
+  text-align: center;
+}
+
+#multiplayer-panel label {
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+#multiplayer-panel input[type="text"] {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  color: #e6e6e6;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+#multiplayer-panel input[type="text"]:focus {
+  outline: none;
+  border-color: #60a5fa;
+}
+
+.multiplayer-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.multiplayer-actions button {
+  margin-top: 0;
+  padding: 10px 18px;
+  font-size: 1rem;
+}
+
+#lobby-status {
+  min-height: 1.2em;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  text-align: center;
+}
+
+#share-box {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 10px;
+  word-break: break-all;
+  font-size: 0.85rem;
+}
+
+.share-overlay {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: rgba(11, 11, 15, 0.92);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 12px;
+  padding: 14px 20px;
+  max-width: min(540px, 90vw);
+  color: #e6e6e6;
+  font-size: 0.9rem;
+  pointer-events: auto;
+  text-align: center;
+}
+
+.share-close {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  background: transparent;
+  color: #cbd5e1;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+#share-box a {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+#share-box code {
+  background: rgba(0,0,0,0.4);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+#share-box .waiting {
+  color: #fbbf24;
+  margin-top: 6px;
+}
 html, body {
   height: 100%;
   margin: 0;

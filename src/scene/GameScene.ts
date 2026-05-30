@@ -1,7 +1,7 @@
 import type { Bot } from '../Bot.js';
 import { GameConfig } from '../GameConfig.js';
 import { Server } from '../Server.js';
-import type { BotPosition, GameState } from '../types.js';
+import type { BotMove, BotPosition, GameState } from '../types.js';
 import { ActionPlanner } from '../planning/ActionPlanner.js';
 import { PlanInputController } from '../planning/PlanInputController.js';
 import { PlanRenderer } from '../planning/PlanRenderer.js';
@@ -11,7 +11,7 @@ import { BotFactory } from '../world/BotFactory.js';
 import { BulletSystem, type BulletSprite } from '../world/BulletSystem.js';
 import { setupBotCollisions } from '../world/CollisionSetup.js';
 import { TextureFactory } from '../world/TextureFactory.js';
-import { DomUi } from '../ui/DomUi.js';
+import { DomUi, type LobbyChoice } from '../ui/DomUi.js';
 import { Hud } from '../ui/Hud.js';
 
 /** Orchestrates all game subsystems. Holds shared state; delegates work. */
@@ -35,6 +35,8 @@ export class GameScene extends Phaser.Scene {
     private isPlanning = true;
     private planDirty = true;
     private server?: Server;
+    private selfPlayerId: 1 | 2 = 1;
+    private nextMoveId = 0;
 
     create(): void {
         this.initSystems();
@@ -45,18 +47,19 @@ export class GameScene extends Phaser.Scene {
         this.planInput.bind();
 
         this.domUi.bind({
-            onWelcomeStart: () => this.startGame(),
+            onWelcomeStart: () => this.startSinglePlayer(),
             onStartRound: () => this.attemptStartRound(),
             onToggleFullscreen: () => this.toggleFullscreen(),
+            onLobbyChoice: choice => this.handleLobbyChoice(choice),
         });
         this.domUi.showWelcome();
 
-        this.maybeBootstrapRemoteGame();
+        this.maybeBootstrapFromUrl();
     }
 
     update(): void {
         if (this.isPlanning && this.planDirty) {
-            this.planRenderer.render(this.player1Bots);
+            this.planRenderer.render(this.getSelfBots());
             this.planDirty = false;
         }
     }
@@ -79,7 +82,7 @@ export class GameScene extends Phaser.Scene {
         this.domUi = new DomUi();
         this.planInput = new PlanInputController(this, this.planner, {
             isPlanning: () => this.isPlanning,
-            getPlayerBots: () => this.player1Bots,
+            getPlayerBots: () => this.getSelfBots(),
             canStartRound: () => this.domUi.isStartEnabled,
             requestStartRound: () => this.attemptStartRound(),
             onPlanChanged: () => this.markPlanDirty(),
@@ -108,6 +111,13 @@ export class GameScene extends Phaser.Scene {
     }
 
     // --- game lifecycle -----------------------------------------------------
+
+    private startSinglePlayer(): void {
+        delete this.server;
+        this.selfPlayerId = 1;
+        this.nextMoveId = 0;
+        this.startGame();
+    }
 
     private startGame(): void {
         this.domUi.showGameUi();
@@ -142,11 +152,48 @@ export class GameScene extends Phaser.Scene {
         if (!this.isPlanning) return;
         this.isPlanning = false;
         this.planRenderer.clear();
+        if (this.server) {
+            this.runMultiplayerRound().catch(error => {
+                console.error('Multiplayer round failed:', error);
+                this.hud.setInfo(['Network error: ' + (error?.message ?? error)]);
+                this.isPlanning = true;
+                this.markPlanDirty();
+            });
+        } else {
+            this.roundController.start({
+                playerBots: this.player1Bots,
+                aiBots: this.player2Bots,
+                allBots: this.bots,
+                barriers: this.barriers,
+            }, () => this.endRound());
+        }
+        this.refreshUi();
+    }
+
+    private async runMultiplayerRound(): Promise<void> {
+        const server = this.server!;
+        const selfBots = this.getSelfBots();
+        const opponentBots = this.getOpponentBots();
+        const moveId = this.nextMoveId;
+
+        const myMoves = selfBots.map(serializeBotAction);
+        this.hud.setInfo(['Waiting for opponent...']);
+        this.domUi.setStatus('Waiting for opponent...');
+
+        await server.submitMove(moveId, myMoves);
+        const roundMoves = await server.waitForRoundMoves(moveId);
+
+        const opponentMove = this.selfPlayerId === 1 ? roundMoves.player2Move : roundMoves.player1Move;
+        applyMovesToBots(opponentBots, opponentMove.moves);
+
+        this.nextMoveId = moveId + 1;
+
         this.roundController.start({
-            playerBots: this.player1Bots,
-            aiBots: this.player2Bots,
+            playerBots: selfBots,
+            aiBots: opponentBots,
             allBots: this.bots,
             barriers: this.barriers,
+            planOpponentActions: () => { /* already applied from remote */ },
         }, () => this.endRound());
         this.refreshUi();
     }
@@ -174,8 +221,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     private checkWinCondition(): void {
-        if (this.player2Bots.length === 0) this.endMatch('You win!');
-        else if (this.player1Bots.length === 0) this.endMatch('You lose!');
+        const selfTeam = this.getSelfBots();
+        const opponentTeam = this.getOpponentBots();
+        if (opponentTeam.length === 0 && selfTeam.length === 0) this.endMatch('Draw!');
+        else if (opponentTeam.length === 0) this.endMatch('You win!');
+        else if (selfTeam.length === 0) this.endMatch('You lose!');
     }
 
     private endMatch(message: string): void {
@@ -193,18 +243,19 @@ export class GameScene extends Phaser.Scene {
     }
 
     private refreshUi(): void {
-        const actionable = this.player1Bots.filter(bot => !bot.isDisabled);
+        const selfBots = this.getSelfBots();
+        const actionable = selfBots.filter(bot => !bot.isDisabled);
         const plannedCount = actionable.filter(bot => bot.action.type !== 'none').length;
-        const disabledCount = this.player1Bots.length - actionable.length;
+        const disabledCount = selfBots.length - actionable.length;
         const disabledSuffix = disabledCount > 0 ? ` (${disabledCount} reloading)` : '';
         const statusLine = this.isPlanning
             ? `Planned: ${plannedCount}/${actionable.length}${disabledSuffix}`
-            : 'Executing round...';
+            : (this.server ? 'Waiting for opponent...' : 'Executing round...');
         this.hud.setInfo([
             statusLine,
             this.isPlanning
                 ? 'Drag from a bot to set move/shoot/sniper. Tap bot to cycle modes.'
-                : 'Executing round...',
+                : statusLine,
         ]);
         this.domUi.setStatus(statusLine);
         this.domUi.setStartEnabled(this.isPlanning);
@@ -215,27 +266,81 @@ export class GameScene extends Phaser.Scene {
         else this.scale.startFullscreen();
     }
 
-    // --- remote game --------------------------------------------------------
+    // --- multiplayer --------------------------------------------------------
 
-    private async maybeBootstrapRemoteGame(): Promise<void> {
+    private getSelfBots(): Bot[] {
+        return this.selfPlayerId === 1 ? this.player1Bots : this.player2Bots;
+    }
+
+    private getOpponentBots(): Bot[] {
+        return this.selfPlayerId === 1 ? this.player2Bots : this.player1Bots;
+    }
+
+    private async maybeBootstrapFromUrl(): Promise<void> {
         const params = new URLSearchParams(window.location.search);
         const serverUrl = params.get('server');
         if (!serverUrl) return;
 
-        this.server = new Server(serverUrl);
         const gameId = params.get('gameId');
-
-        if (gameId) {
-            await this.server.joinGame(gameId);
-            if (this.server.gameState) {
-                this.startGame();
-                this.applyGameState(this.server.gameState);
+        try {
+            if (gameId) {
+                await this.joinMultiplayer(serverUrl, gameId);
+            } else {
+                await this.createMultiplayer(serverUrl);
             }
-            return;
+        } catch (error) {
+            console.error('Failed to bootstrap multiplayer from URL:', error);
+            this.domUi.setLobbyError(error instanceof Error ? error.message : String(error));
         }
+    }
 
+    private handleLobbyChoice(choice: LobbyChoice): void {
+        const action = choice.action === 'create'
+            ? this.createMultiplayer(choice.serverUrl)
+            : this.joinMultiplayer(choice.serverUrl, choice.gameId!);
+        action.catch(error => {
+            console.error('Multiplayer setup failed:', error);
+            this.domUi.setLobbyError(error instanceof Error ? error.message : String(error));
+        });
+    }
+
+    private async createMultiplayer(serverUrl: string): Promise<void> {
+        this.domUi.setLobbyBusy('Creating game...');
+        this.domUi.showCreateSpinner(true);
+        try {
+            this.server = new Server(serverUrl);
+            this.selfPlayerId = 1;
+            this.nextMoveId = 0;
+            // Prepare game state, but do not show game UI yet
+            this.resetGame();
+            await this.server.startGame(this.barriers, this.player1Bots, this.player2Bots);
+            this.startGame();
+            const shareUrl = this.buildShareUrl(serverUrl, this.server.gameId!);
+            this.domUi.showShareLink(shareUrl);
+        } finally {
+            this.domUi.showCreateSpinner(false);
+        }
+    }
+
+    private async joinMultiplayer(serverUrl: string, gameId: string): Promise<void> {
+        this.domUi.setLobbyBusy('Joining game...');
+        this.server = new Server(serverUrl);
+        await this.server.joinGame(gameId);
+        if (!this.server.gameState) {
+            throw new Error('Joined game has no state');
+        }
+        this.selfPlayerId = 2;
+        this.nextMoveId = this.server.gameState.moveId;
         this.startGame();
-        await this.server.startGame(this.barriers, this.player1Bots, this.player2Bots);
+        this.applyGameState(this.server.gameState);
+        this.markPlanDirty();
+    }
+
+    private buildShareUrl(serverUrl: string, gameId: string): string {
+        const url = new URL(window.location.href);
+        url.searchParams.set('server', serverUrl);
+        url.searchParams.set('gameId', gameId);
+        return url.toString();
     }
 
     private applyGameState(state: GameState): void {
@@ -257,9 +362,49 @@ export class GameScene extends Phaser.Scene {
             const state = states.find(s => s.botId === bot.id);
             if (!state) {
                 bot.isAlive = false;
+                bot.sprite.setVisible(false);
+                bot.sprite.disableBody(true, true);
             } else {
                 bot.sprite.setPosition(state.x, state.y);
             }
         }
+    }
+}
+
+/** Pack a bot's currently-planned action as a wire-format BotMove. */
+function serializeBotAction(bot: Bot): BotMove {
+    const action = bot.action;
+    const mode = bot.isDisabled ? 'none' : action.type;
+    const direction = action.direction;
+    return {
+        botId: bot.id,
+        mode,
+        directionX: direction.x,
+        directionY: direction.y,
+        distance: action.distance,
+    };
+}
+
+/** Apply a list of remote BotMoves to the matching bots in `bots`. */
+function applyMovesToBots(bots: Bot[], moves: BotMove[]): void {
+    for (const bot of bots) {
+        if (!bot.isAlive || bot.isDisabled) continue;
+        const move = moves.find(m => m.botId === bot.id);
+        if (!move || move.mode === 'none') {
+            bot.action = {
+                type: 'none',
+                direction: new Phaser.Math.Vector2(1, 0),
+                distance: 0,
+            };
+            continue;
+        }
+        const direction = new Phaser.Math.Vector2(move.directionX, move.directionY);
+        if (direction.lengthSq() === 0) direction.set(1, 0);
+        direction.normalize();
+        bot.action = {
+            type: move.mode,
+            direction,
+            distance: move.distance,
+        };
     }
 }

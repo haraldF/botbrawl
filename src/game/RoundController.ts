@@ -8,6 +8,12 @@ export interface RoundDependencies {
     aiBots: Bot[];
     allBots: Bot[];
     barriers: Phaser.Physics.Arcade.StaticGroup;
+    /**
+     * Optional hook for assigning opponent (aiBots) actions before the round executes.
+     * Defaults to the local AI planner. In multiplayer this is replaced by a function
+     * that applies the remote player's submitted moves.
+     */
+    planOpponentActions?: (playerBots: Bot[], aiBots: Bot[], barriers: Phaser.Physics.Arcade.StaticGroup) => void;
 }
 
 /** Runs a single planning -> execution -> cleanup cycle. */
@@ -21,14 +27,8 @@ export class RoundController {
 
     start(deps: RoundDependencies, onRoundEnded: () => void): void {
         this.resetPlayerSizes(deps.playerBots);
-        planAiActions(
-            deps.playerBots,
-            deps.aiBots,
-            deps.barriers,
-            GameConfig.MAX_MOVE_DISTANCE,
-            GameConfig.SHOOT_PREVIEW_LENGTH,
-            GameConfig.SNIPER_PREVIEW_LENGTH
-        );
+        const planOpponent = deps.planOpponentActions ?? defaultOpponentPlanner;
+        planOpponent(deps.playerBots, deps.aiBots, deps.barriers);
         this.executeActions(deps.allBots);
         this.scene.time.delayedCall(this.roundDurationMs, () => {
             this.cleanupRound(deps.allBots);
@@ -79,4 +79,19 @@ export class RoundController {
         }
         this.bullets.clearAll();
     }
+}
+
+function defaultOpponentPlanner(
+    playerBots: Bot[],
+    aiBots: Bot[],
+    barriers: Phaser.Physics.Arcade.StaticGroup
+): void {
+    planAiActions(
+        playerBots,
+        aiBots,
+        barriers,
+        GameConfig.MAX_MOVE_DISTANCE,
+        GameConfig.SHOOT_PREVIEW_LENGTH,
+        GameConfig.SNIPER_PREVIEW_LENGTH
+    );
 }
