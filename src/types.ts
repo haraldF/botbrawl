@@ -39,7 +39,17 @@ export interface NewGameRequest {
 
 export interface GameState {
     moveId: number;
+    /** Most recent completed round whose positions are stored in this state. */
+    stateMoveId: number;
     barrierPositions: BarrierPosition[];
+    player1BotPositions: BotPosition[];
+    player2BotPositions: BotPosition[];
+}
+
+/** Host-provided final positions for a completed multiplayer round. */
+export interface GameStateUpdate {
+    playerId: 1;
+    moveId: number;
     player1BotPositions: BotPosition[];
     player2BotPositions: BotPosition[];
 }

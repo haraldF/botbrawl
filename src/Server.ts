@@ -1,6 +1,6 @@
 import { GameConfig } from './GameConfig.js';
 import type { Bot } from './Bot.js';
-import type { BotMove, GameState, Move, NewGameRequest, RoundMovesResponse } from './types.js';
+import type { BotMove, GameState, GameStateUpdate, Move, NewGameRequest, RoundMovesResponse } from './types.js';
 
 export class Server {
 
@@ -97,6 +97,50 @@ export class Server {
             }
             throw new Error(`Failed to fetch round moves: ${response.status} ${response.statusText}`);
         }
+    }
+
+    /** Publish the host's final unit positions for a completed round. */
+    async updateGameState(moveId: number, player1Bots: Bot[], player2Bots: Bot[]): Promise<void> {
+        if (!this.gameId) throw new Error('Cannot update game state: no active game');
+        const payload: GameStateUpdate = {
+            playerId: 1,
+            moveId,
+            player1BotPositions: this.serializeLivePositions(player1Bots),
+            player2BotPositions: this.serializeLivePositions(player2Bots),
+        };
+        const response = await fetch(`${this.url}/botbrawl/game/state/${this.gameId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to update game state: ${response.status} ${response.statusText}`);
+        }
+    }
+
+    /** Long-poll until the host publishes state after the given completed round. */
+    async waitForGameState(moveId: number): Promise<GameState> {
+        if (!this.gameId) throw new Error('Cannot wait for game state: no active game');
+        while (true) {
+            const response = await fetch(
+                `${this.url}/botbrawl/game/state/${this.gameId}?stateMoveId=${moveId}`
+            );
+            if (response.ok) {
+                return await response.json();
+            }
+            if (response.status === 504) {
+                continue;
+            }
+            throw new Error(`Failed to fetch game state: ${response.status} ${response.statusText}`);
+        }
+    }
+
+    private serializeLivePositions(bots: Bot[]) {
+        return bots.filter(bot => bot.isAlive).map(bot => ({
+            botId: bot.id,
+            x: bot.sprite.x,
+            y: bot.sprite.y,
+        }));
     }
 }
 

@@ -57,7 +57,7 @@ export class BotFactory {
 
         const initialAction: BotAction = {
             type: 'none',
-            direction: new Phaser.Math.Vector2(1, 0),
+            direction: new Phaser.Math.Vector2(playerId === 1 ? 1 : -1, 0),
             distance: 0,
         };
         return {

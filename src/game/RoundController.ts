@@ -61,7 +61,11 @@ export class RoundController {
             if (!bot.isAlive) continue;
             const usedSniper = bot.action.type === 'sniper';
             bot.sprite.setVelocity(0, 0);
-            bot.action = { type: 'none', direction: new Phaser.Math.Vector2(1, 0), distance: 0 };
+            bot.action = {
+                type: 'none',
+                direction: new Phaser.Math.Vector2(bot.playerId === 1 ? 1 : -1, 0),
+                distance: 0,
+            };
             delete bot.plannedMove;
             delete bot.plannedShoot;
             delete bot.plannedSniper;

@@ -194,8 +194,26 @@ export class GameScene extends Phaser.Scene {
             allBots: this.bots,
             barriers: this.barriers,
             planOpponentActions: () => { /* already applied from remote */ },
-        }, () => this.endRound());
+        }, () => {
+            this.syncMultiplayerRound(moveId).catch(error => {
+                console.error('Multiplayer state sync failed:', error);
+                this.hud.setInfo(['Network error: ' + (error?.message ?? error)]);
+                this.isPlanning = true;
+                this.markPlanDirty();
+            });
+        });
         this.refreshUi();
+    }
+
+    private async syncMultiplayerRound(moveId: number): Promise<void> {
+        const server = this.server!;
+        if (this.selfPlayerId === 1) {
+            await server.updateGameState(moveId, this.player1Bots, this.player2Bots);
+        } else {
+            const state = await server.waitForGameState(moveId);
+            this.applyGameState(state);
+        }
+        this.endRound();
     }
 
     private endRound(): void {
@@ -314,7 +332,7 @@ export class GameScene extends Phaser.Scene {
             // Prepare game state, but do not show game UI yet
             this.resetGame();
             await this.server.startGame(this.barriers, this.player1Bots, this.player2Bots);
-            this.startGame();
+            this.domUi.showGameUi();
             const shareUrl = this.buildShareUrl(serverUrl, this.server.gameId!);
             this.domUi.showShareLink(shareUrl);
         } finally {
@@ -352,22 +370,27 @@ export class GameScene extends Phaser.Scene {
             const child = barrierChildren[i] as Phaser.Physics.Arcade.Image;
             const pos = state.barrierPositions[i]!;
             child.setPosition(pos.x, pos.y);
+            child.refreshBody();
         }
-        this.applyTeamPositions(this.player1Bots, state.player1BotPositions);
-        this.applyTeamPositions(this.player2Bots, state.player2BotPositions);
+        this.player1Bots = this.applyTeamPositions(this.player1Bots, state.player1BotPositions);
+        this.player2Bots = this.applyTeamPositions(this.player2Bots, state.player2BotPositions);
+        this.bots = [...this.player1Bots, ...this.player2Bots];
     }
 
-    private applyTeamPositions(team: Bot[], states: BotPosition[]): void {
-        for (const bot of team) {
+    private applyTeamPositions(team: Bot[], states: BotPosition[]): Bot[] {
+        return team.filter(bot => {
             const state = states.find(s => s.botId === bot.id);
             if (!state) {
                 bot.isAlive = false;
                 bot.sprite.setVisible(false);
                 bot.sprite.disableBody(true, true);
+                return false;
             } else {
                 bot.sprite.setPosition(state.x, state.y);
+                bot.sprite.body?.reset(state.x, state.y);
+                return true;
             }
-        }
+        });
     }
 }
 
