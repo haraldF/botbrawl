@@ -27,20 +27,27 @@ interface Game extends GameState {
 }
 
 function isNewGameRequest(obj: any): obj is NewGameRequest {
-    return typeof obj === 'object' &&
+    return obj !== null &&
+        typeof obj === 'object' &&
         typeof obj.clientVersion === 'string' &&
         Array.isArray(obj.barrierPositions) &&
-        obj.barrierPositions.every((bp: any) => typeof bp.x === 'number' && typeof bp.y === 'number') &&
+        obj.barrierPositions.every((bp: any) => bp != null && typeof bp.x === 'number' && typeof bp.y === 'number') &&
         Array.isArray(obj.player1BotPositions) &&
-        obj.player1BotPositions.every((bp: any) => typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number') &&
+        obj.player1BotPositions.every((bp: any) => bp != null && typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number') &&
         Array.isArray(obj.player2BotPositions) &&
-        obj.player2BotPositions.every((bp: any) => typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number');
+        obj.player2BotPositions.every((bp: any) => bp != null && typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number');
 }
 
-interface GameError extends Error
+class GameError extends Error
 {
     statusCode: number;
-    message: string;
+
+    constructor(statusCode: number, message: string)
+    {
+        super(message);
+        this.statusCode = statusCode;
+        this.name = 'GameError';
+    }
 }
 
 function waitForMoves(game: Game, moveId: number): Promise<void> {
@@ -64,7 +71,7 @@ function waitForMoves(game: Game, moveId: number): Promise<void> {
 
         const timeoutHandle = setTimeout(() => {
             game.listeners.delete(callback);
-            reject({ statusCode: 504, message: 'Timeout waiting for moves' });
+            reject(new GameError(504, 'Timeout waiting for moves'));
         }, LongPollTimeout);
     });
 }
@@ -88,13 +95,14 @@ function waitForGameState(game: Game, stateMoveId: number): Promise<void> {
 
         const timeoutHandle = setTimeout(() => {
             game.listeners.delete(callback);
-            reject({ statusCode: 504, message: 'Timeout waiting for game state' });
+            reject(new GameError(504, 'Timeout waiting for game state'));
         }, LongPollTimeout);
     });
 }
 
 function isMove(obj: any): obj is BotMove {
-    return typeof obj === 'object' &&
+    return obj !== null &&
+        typeof obj === 'object' &&
         typeof obj.botId === 'number' &&
         typeof obj.directionX === 'number' &&
         typeof obj.directionY === 'number' &&
@@ -103,7 +111,8 @@ function isMove(obj: any): obj is BotMove {
 }
 
 function isMoves(obj: any): obj is Move {
-    return typeof obj === 'object' &&
+    return obj !== null &&
+        typeof obj === 'object' &&
         (obj.playerId === 1 || obj.playerId === 2) &&
         typeof obj.moveId === 'number' &&
         Array.isArray(obj.moves) &&
@@ -116,17 +125,14 @@ function isMoves(obj: any): obj is Move {
         obj.playerId === 1 &&
         typeof obj.moveId === 'number' &&
         Array.isArray(obj.player1BotPositions) &&
-        obj.player1BotPositions.every((bp: any) => typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number') &&
+        obj.player1BotPositions.every((bp: any) => bp != null && typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number') &&
         Array.isArray(obj.player2BotPositions) &&
-        obj.player2BotPositions.every((bp: any) => typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number');
+        obj.player2BotPositions.every((bp: any) => bp != null && typeof bp.botId === 'number' && typeof bp.x === 'number' && typeof bp.y === 'number');
     }
 
 function isGameError(obj: any): obj is GameError
 {
-    return typeof obj === 'object' &&
-        obj !== null &&
-        typeof obj.statusCode === 'number' &&
-        typeof obj.message === 'string';
+    return obj instanceof GameError;
 }
 
 interface GameResponse {
@@ -158,8 +164,8 @@ async function toJson(req: http.IncomingMessage): Promise<any> {
             try {
                 const data = JSON.parse(body);
                 resolve(data);
-            } catch (error) {
-                reject(error);
+            } catch {
+                reject(new GameError(400, 'Invalid JSON body'));
             }
         });
     });
@@ -191,7 +197,7 @@ async function newGame(newGameRequest: NewGameRequest)
 async function deleteGame(gameId: string)
 {
     if (!games.has(gameId)) {
-        throw { statusCode: 404, message: 'Game not found' };
+        throw new GameError(404, 'Game not found');
     }
     games.delete(gameId);
 
@@ -219,10 +225,10 @@ async function handleGameStateUpdate(gameId: string, update: GameStateUpdate)
 {
     const game = games.get(gameId);
     if (!game) {
-        throw { statusCode: 404, message: 'Game not found' };
+        throw new GameError(404, 'Game not found');
     }
     if (update.moveId !== game.completedMoveId) {
-        throw { statusCode: 409, message: 'Game state must match the latest completed round' };
+        throw new GameError(409, 'Game state must match the latest completed round');
     }
 
     game.player1BotPositions = update.player1BotPositions.map(bp => ({ botId: bp.botId, x: bp.x, y: bp.y }));
@@ -241,11 +247,15 @@ async function handleMove(gameId: string, move: Move)
 {
     const game = games.get(gameId);
     if (!game) {
-        throw { statusCode: 404, message: 'Game not found' };
+        throw new GameError(404, 'Game not found');
     }
 
-    if (move.moveId < 0) {
-        throw { statusCode: 400, message: 'Invalid moveId' };
+    if (!Number.isInteger(move.moveId) || move.moveId < 0) {
+        throw new GameError(400, 'Invalid moveId');
+    }
+
+    if (move.moveId !== game.moveId) {
+        throw new GameError(409, 'Move must match the current round');
     }
 
     game.lastActivity = Math.max(game.lastActivity, Date.now());
@@ -261,7 +271,7 @@ async function handleMove(gameId: string, move: Move)
     } else if (move.playerId === 2) {
         round.player2Move = move;
     } else {
-        throw { statusCode: 400, message: 'Invalid playerId' };
+        throw new GameError(400, 'Invalid playerId');
     }
 
     if (round.player1Move && round.player2Move && move.moveId > game.completedMoveId) {
@@ -293,7 +303,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     if (req.method === 'POST' && url.pathname === '/botbrawl/game') {
         const newGameRequest = await toJson(req);
         if (!isNewGameRequest(newGameRequest)) {
-            throw { statusCode: 400, message: 'Invalid New Game Request format' };
+            throw new GameError(400, 'Invalid New Game Request format');
         }
         return await newGame(newGameRequest);
     }
@@ -307,7 +317,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const gameId = url.pathname.split('/')[4] ?? '';
         const update = await toJson(req);
         if (!isGameStateUpdate(update)) {
-            throw { statusCode: 400, message: 'Invalid Game State format' };
+            throw new GameError(400, 'Invalid Game State format');
         }
         return await handleGameStateUpdate(gameId, update);
     }
@@ -316,7 +326,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const gameId = url.pathname.split('/')[4] ?? '';
         const game = games.get(gameId);
         if (!game) {
-            throw { statusCode: 404, message: 'Game not found' };
+            throw new GameError(404, 'Game not found');
         }
 
         const stateMoveIdParam = url.searchParams.get('stateMoveId');
@@ -325,7 +335,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         }
         const requestedStateMoveId = parseInt(stateMoveIdParam, 10);
         if (!Number.isFinite(requestedStateMoveId) || requestedStateMoveId < 0) {
-            throw { statusCode: 400, message: 'Invalid stateMoveId query parameter' };
+            throw new GameError(400, 'Invalid stateMoveId query parameter');
         }
         return await gameState(game, requestedStateMoveId);
     }
@@ -334,7 +344,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const gameId = url.pathname.split('/')[4] ?? '';
         const move = await toJson(req);
         if (!isMoves(move)) {
-            throw { statusCode: 400, message: 'Invalid Move format' };
+            throw new GameError(400, 'Invalid Move format');
         }
 
         return await handleMove(gameId, move);
@@ -344,16 +354,16 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const gameId = url.pathname.split('/')[4] ?? '';
         const game = games.get(gameId);
         if (!game) {
-            throw { statusCode: 404, message: 'Game not found' };
+            throw new GameError(404, 'Game not found');
         }
 
         const moveIdParam = url.searchParams.get('moveId');
         if (moveIdParam === null) {
-            throw { statusCode: 400, message: 'Missing moveId query parameter' };
+            throw new GameError(400, 'Missing moveId query parameter');
         }
         const requestedMoveId = parseInt(moveIdParam, 10);
         if (!Number.isFinite(requestedMoveId) || requestedMoveId < 0) {
-            throw { statusCode: 400, message: 'Invalid moveId query parameter' };
+            throw new GameError(400, 'Invalid moveId query parameter');
         }
 
         const round = game.rounds.get(requestedMoveId);
@@ -370,7 +380,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         } };
     }
 
-    throw { statusCode: 404, message: 'Not Found' };
+    throw new GameError(404, 'Not Found');
 }
 
 function addCorsHeaders(res: http.ServerResponse)
